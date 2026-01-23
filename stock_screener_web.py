@@ -564,7 +564,7 @@ if check_password():
                             st.warning("⚠️ 이미 추가된 종목입니다.")
                 
                 with col_analyze:
-if data:
+                    if data:
                         analysis = screener.analyze_stock(code, name, sector, data)
                         
                         if analysis:
@@ -837,6 +837,7 @@ with tab3:
             st.success(f"✅ 찾음: **{name}** (종목코드: {code}, 섹터: {sector})")
         else:
             st.warning(f"⚠️ '{search_query}'에 대한 검색 결과가 없습니다.")
+
 
 
 
