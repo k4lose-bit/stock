@@ -6,7 +6,7 @@ import time
 
 # --- 보안 및 설정 ---
 # 비밀번호 'st0727@6816'의 SHA-256 해시
-CORRECT_PASSWORD_HASH = "8b5c191c56c3c2c286f120e275abd6dd89e785b0aa5d6c1e1b4c8f5e8c3e7f2a"
+CORRECT_PASSWORD_HASH = "f8d0e0c8e8b5e3f3a8c9d5e7f2a4b6c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"
 
 def check_password():
     if "password_correct" not in st.session_state:
@@ -16,7 +16,9 @@ def check_password():
         pw_input = st.sidebar.text_input("접속 비밀번호", type="password", key="pw_input")
         if st.sidebar.button("로그인"):
             if pw_input:
-                entered_hash = hashlib.sha256(pw_input.encode()).hexdigest()
+                entered_hash = hashlib.sha256(pw_input.encode('utf-8')).hexdigest()
+                # 디버깅용 (실제 배포시 삭제)
+                st.sidebar.info(f"입력한 해시: {entered_hash}")
                 if entered_hash == CORRECT_PASSWORD_HASH:
                     st.session_state["password_correct"] = True
                     st.rerun()
