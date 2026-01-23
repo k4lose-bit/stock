@@ -629,11 +629,11 @@ if check_password():
                                     st.subheader("🎯 감지된 신호")
                                     for signal in analysis['signals']:
                                         st.markdown(f"- {signal}")
-                            else:
+                               else:
                                 st.error("분석 중 오류가 발생했습니다.")
-                        else:
+                               else:
                             st.error(f"⚠️ {name} ({code}) 데이터를 가져올 수 없습니다.")
-        else:
+                               else:
             st.warning(f"⚠️ '{company_search}'에 대한 검색 결과가 없습니다.")
             st.info("💡 종목코드를 직접 입력하시거나 다른 기업명을 시도해보세요.")
     
@@ -843,3 +843,4 @@ with tab3:
             st.success(f"✅ 찾음: **{name}** (종목코드: {code}, 섹터: {sector})")
         else:
             st.warning(f"⚠️ '{search_query}'에 대한 검색 결과가 없습니다.")
+
