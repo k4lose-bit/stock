@@ -563,7 +563,11 @@ if check_password():
                         else:
                             st.warning("⚠️ 이미 추가된 종목입니다.")
                 
-                with col_analyze:
+# 566행 시작 부분
+                with st.spinner(f"{name} 분석 중..."):
+                    # 아래 줄부터 'with' 문 안쪽으로 들여쓰기(스페이스 4칸)가 적용되었습니다.
+                    data = screener.get_stock_data(code)
+                    
                     if data:
                         analysis = screener.analyze_stock(code, name, sector, data)
                         
@@ -571,7 +575,7 @@ if check_password():
                             st.divider()
                             st.subheader(f"📈 {name} ({code}) 상세 분석")
                             
-                            # 기본 정보
+                            # 기본 정보 출력
                             col1, col2, col3, col4 = st.columns(4)
                             with col1:
                                 st.metric("현재가", f"{int(analysis['current']):,}원")
@@ -585,7 +589,7 @@ if check_password():
                             
                             st.divider()
                             
-                            # 매매 추천
+                            # 매매 추천 섹션
                             st.subheader("💡 매매 추천")
                             rec_col1, rec_col2 = st.columns([1, 3])
                             with rec_col1:
@@ -595,7 +599,7 @@ if check_password():
                             
                             st.divider()
                             
-                            # 기술적 지표
+                            # 기술적 지표 분석
                             st.subheader("📊 기술적 지표")
                             indicator_col1, indicator_col2 = st.columns(2)
                             
@@ -618,18 +622,17 @@ if check_password():
                                     st.success(f"🟢 MACD {analysis['macd']:.2f} - 상승 추세")
                                 else:
                                     st.warning(f"🟡 MACD {analysis['macd']:.2f} - 하락 추세")
-                        
-                            # 감지된 신호들
-                            if analysis['signals']:
+
+                            # 감지된 신호 리스트
+                            if analysis.get('signals'):
                                 st.divider()
                                 st.subheader("🎯 감지된 신호")
                                 for signal in analysis['signals']:
                                     st.markdown(f"- {signal}")
                         else:
-                            st.error("분석 중 오류가 발생했습니다.")
+                            st.error("분석 결과를 생성하는 중 오류가 발생했습니다.")
                     else:
-                        st.error(f"⚠️ '{name} {code}' 데이터를 가져올 수 없습니다.")
-
+                        st.error(f"⚠️ '{name} ({code})' 데이터를 가져올 수 없습니다.")
 # (참고) 만약 기업 검색 결과가 없을 때의 처리가 필요하다면 
 # 이 버튼 블록을 감싸는 상위 if문에 else를 붙여야 합니다.
     
@@ -837,6 +840,7 @@ with tab3:
             st.success(f"✅ 찾음: **{name}** (종목코드: {code}, 섹터: {sector})")
         else:
             st.warning(f"⚠️ '{search_query}'에 대한 검색 결과가 없습니다.")
+
 
 
 
