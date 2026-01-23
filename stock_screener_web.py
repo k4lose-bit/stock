@@ -5,18 +5,25 @@ import hashlib
 import time
 
 # --- 보안 및 설정 ---
-# 비밀번호 '1234'의 SHA-256 해시
-CORRECT_PASSWORD_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
+# 비밀번호 'st0727@6816'의 SHA-256 해시
+CORRECT_PASSWORD_HASH = "8b5c191c56c3c2c286f120e275abd6dd89e785b0aa5d6c1e1b4c8f5e8c3e7f2a"
 
 def check_password():
     if "password_correct" not in st.session_state:
-        st.sidebar.text_input("접속 비밀번호", type="password", key="pw_input")
+        st.session_state["password_correct"] = False
+    
+    if not st.session_state["password_correct"]:
+        pw_input = st.sidebar.text_input("접속 비밀번호", type="password", key="pw_input")
         if st.sidebar.button("로그인"):
-            entered_hash = hashlib.sha256(st.session_state.pw_input.encode()).hexdigest()
-            st.session_state["password_correct"] = entered_hash == CORRECT_PASSWORD_HASH
-            st.rerun()
+            if pw_input:
+                entered_hash = hashlib.sha256(pw_input.encode()).hexdigest()
+                if entered_hash == CORRECT_PASSWORD_HASH:
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.sidebar.error("❌ 비밀번호가 틀렸습니다.")
         return False
-    return st.session_state["password_correct"]
+    return True
 
 # --- 스크리닝 엔진 클래스 ---
 class StockScreener:
@@ -50,7 +57,6 @@ class StockScreener:
                 'history': df['종가'].tolist()[::-1]
             }
         except Exception as e:
-            st.error(f"데이터 수집 오류 ({code}): {str(e)}")
             return None
 
     def calculate_rsi(self, prices, period=14):
@@ -107,6 +113,11 @@ if check_password():
     screener = StockScreener()
     
     with st.sidebar:
+        st.success("✅ 로그인 성공!")
+        if st.button("로그아웃"):
+            st.session_state["password_correct"] = False
+            st.rerun()
+        
         st.header("⚙️ 필터 설정")
         
         # 사용 가능한 필터 리스트
@@ -163,4 +174,4 @@ if check_password():
         else:
             st.warning("조건에 부합하는 종목이 현재 없습니다.")
 else:
-    st.info("👈 사이드바에서 비밀번호를 입력하세요.")
+    st.info("👈 사이드바에서 비밀번호를 입력하세요")
