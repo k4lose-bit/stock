@@ -5,7 +5,7 @@ import hashlib
 import time
 
 # --- 보안 및 설정 ---
-# 비밀번호 '1234'에 대한 예시 해시값입니다.
+# 비밀번호 '1234'의 SHA-256 해시 예시
 CORRECT_PASSWORD_HASH = "81216e5077271e1645e759247f485078508e75877f68508a8e75877f68508a8e"
 
 def check_password():
@@ -24,11 +24,12 @@ class StockScreener:
 
     @st.cache_data(ttl=600)
     def get_stock_data(_self, code):
-        """네이버 금융 일별 시세 수집 [6, 7]"""
+        """네이버 금융 일별 시세 수집 [8]"""
         try:
             url = f"https://finance.naver.com/item/sise_day.naver?code={code}&page=1"
             res = requests.get(url, headers=_self.headers)
-            df = pd.read_html(res.text).dropna()
+            df_list = pd.read_html(res.text) # 리스트 형태로 반환됨
+            df = df_list.dropna()
             
             if df.empty: return None
             
@@ -39,11 +40,11 @@ class StockScreener:
                 'volume': df.iloc['거래량'],
                 'history': df['종가'].tolist()[::-1]
             }
-        except:
+        except Exception as e:
             return None
 
     def calculate_rsi(self, prices, period=14):
-        """RSI 지표 계산 [8, 9]"""
+        """RSI 지표 계산 [9, 10]"""
         if len(prices) < period + 1: return 50
         series = pd.Series(prices)
         delta = series.diff()
@@ -53,7 +54,7 @@ class StockScreener:
         return 100 - (100 / (1 + rs.iloc[-1]))
 
     def check_conditions(self, code, name, data, selected_filters, params):
-        """다중 조건 필터링 [10, 4]"""
+        """다중 조건 AND 로직 필터링 """
         try:
             if "Gap Down" in selected_filters:
                 gap = ((data['open'] - data['prev_close']) / data['prev_close']) * 100
@@ -86,7 +87,7 @@ if check_password():
     
     with st.sidebar:
         st.header("⚙️ 필터 설정")
-        # 오류 해결: available_filters 리스트 값 할당 [11, 4]
+        # 오류 해결: 사용 가능한 필터 리스트를 명시적으로 정의 [11, 4]
         available_filters =
         selected_filters = st.multiselect(
             "적용할 스크리닝 조건을 선택하세요",
@@ -103,7 +104,7 @@ if check_password():
             params['rsi_min'], params['rsi_max'] = st.slider("RSI 탐색 범위", 0, 100, (0, 30))
 
     if st.button("🔍 스크리닝 시작"):
-        # 오류 해결: stocks 리스트 및 results 변수 초기화 [12, 4]
+        # 오류 해결: 분석 대상 종목 리스트 정의 [12, 13]
         stocks =
         results =
         
@@ -114,10 +115,10 @@ if check_password():
                 res = screener.check_conditions(code, name, data, selected_filters, params)
                 if res: results.append(res)
             progress_bar.progress((i + 1) / len(stocks))
-            time.sleep(0.2) # IP 차단 방지
+            time.sleep(0.2) # IP 차단 방지 [6, 7]
 
         if results:
-            st.success(f"{len(results)}개의 종목을 찾았습니다.")
+            st.success(f"조건에 맞는 종목 {len(results)}개를 찾았습니다.")
             st.dataframe(pd.DataFrame(results), use_container_width=True)
         else:
-            st.warning("조건에 맞는 종목이 없습니다.")
+            st.warning("조건에 부합하는 종목이 현재 없습니다.")
