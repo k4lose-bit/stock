@@ -5,14 +5,13 @@ import hashlib
 import time
 
 # --- 보안 및 설정 ---
-# '1234'의 SHA-256 해시값 예시입니다.
+# 비밀번호 '1234'에 대한 예시 해시값입니다.
 CORRECT_PASSWORD_HASH = "81216e5077271e1645e759247f485078508e75877f68508a8e75877f68508a8e"
 
 def check_password():
     if "password_correct" not in st.session_state:
         st.sidebar.text_input("접속 비밀번호", type="password", key="pw_input")
         if st.sidebar.button("로그인"):
-            # 입력값 해싱 후 비교 [7]
             st.session_state["password_correct"] = hashlib.sha256(st.session_state.pw_input.encode()).hexdigest() == CORRECT_PASSWORD_HASH
             st.rerun()
         return False
@@ -23,13 +22,12 @@ class StockScreener:
     def __init__(self):
         self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 
-    @st.cache_data(ttl=600) # 10분간 캐싱 [1]
+    @st.cache_data(ttl=600)
     def get_stock_data(_self, code):
-        """네이버 금융 일별 시세 수집 [8, 9]"""
+        """네이버 금융 일별 시세 수집 [6, 7]"""
         try:
             url = f"https://finance.naver.com/item/sise_day.naver?code={code}&page=1"
             res = requests.get(url, headers=_self.headers)
-            # pandas read_html을 이용한 효율적 파싱 [8, 10]
             df = pd.read_html(res.text).dropna()
             
             if df.empty: return None
@@ -45,7 +43,7 @@ class StockScreener:
             return None
 
     def calculate_rsi(self, prices, period=14):
-        """RSI 지표 계산 [11, 12, 13]"""
+        """RSI 지표 계산 [8, 9]"""
         if len(prices) < period + 1: return 50
         series = pd.Series(prices)
         delta = series.diff()
@@ -55,7 +53,7 @@ class StockScreener:
         return 100 - (100 / (1 + rs.iloc[-1]))
 
     def check_conditions(self, code, name, data, selected_filters, params):
-        """다중 조건 AND 로직 필터링 [14, 4]"""
+        """다중 조건 필터링 [10, 4]"""
         try:
             if "Gap Down" in selected_filters:
                 gap = ((data['open'] - data['prev_close']) / data['prev_close']) * 100
@@ -88,7 +86,7 @@ if check_password():
     
     with st.sidebar:
         st.header("⚙️ 필터 설정")
-        # 오류 해결: available_filters 리스트를 정확히 정의 [6, 4]
+        # 오류 해결: available_filters 리스트 값 할당 [11, 4]
         available_filters =
         selected_filters = st.multiselect(
             "적용할 스크리닝 조건을 선택하세요",
@@ -105,7 +103,7 @@ if check_password():
             params['rsi_min'], params['rsi_max'] = st.slider("RSI 탐색 범위", 0, 100, (0, 30))
 
     if st.button("🔍 스크리닝 시작"):
-        # 오류 해결: stocks 리스트 정의 및 초기 results 리스트 생성 [10, 4]
+        # 오류 해결: stocks 리스트 및 results 변수 초기화 [12, 4]
         stocks =
         results =
         
@@ -116,22 +114,10 @@ if check_password():
                 res = screener.check_conditions(code, name, data, selected_filters, params)
                 if res: results.append(res)
             progress_bar.progress((i + 1) / len(stocks))
-            time.sleep(0.2) # IP 차단 방지 [15]
+            time.sleep(0.2) # IP 차단 방지
 
         if results:
             st.success(f"{len(results)}개의 종목을 찾았습니다.")
             st.dataframe(pd.DataFrame(results), use_container_width=True)
         else:
             st.warning("조건에 맞는 종목이 없습니다.")
-
-## 깃허브 기반 배포 프로세스 및 CI/CD 고도화
-
-수정된 스크리너를 깃허브를 통해 업데이트하면 스트림릿 커뮤니티 클라우드가 자동으로 리포지토리를 모니터링하여 변경 사항을 즉시 반영합니다.[16, 17] 
-
-1.  **커밋 및 푸시:** 수정한 코드를 `main` 브랜치에 `git commit` 후 `push` 합니다.
-2.  **자동 배포:** 스트림릿 클라우드는 푸시 이벤트를 감지하여 앱을 다시 빌드하고 배포합니다.[18, 16] 
-3.  **의존성 관리:** `requirements.txt`에 `streamlit`, `pandas`, `requests`, `beautifulsoup4`, `lxml` 등이 포함되어 있는지 확인해야 합니다.[17, 4]
-
-## 스크리너 고도화를 위한 전략적 제언 및 결론
-
-본 연구를 통해 분석한 결과, 깃허브와 스트림릿을 결합한 동적 스크리닝 시스템은 투자자에게 실시간 전략 수정이라는 강력한 도구를 제공합니다.[19] 구문 오류를 해결한 완성형 코드는 기술적 지표(RSI, 갭)와 수급 지표를 결합한 복합 전략의 초석이 될 것입니다. 향후에는 딥러닝 기반의 주가 예측 모델이나 대규모 종목 리스트 연동을 통해 시스템을 더욱 확장할 수 있습니다.[20, 21]
