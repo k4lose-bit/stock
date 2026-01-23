@@ -26,6 +26,84 @@ def check_password():
         return False
     return True
 
+# 한국 주요 종목 데이터베이스
+STOCK_DATABASE = {
+    # AI 관련주
+    "NAVER": ("035420", "AI"),
+    "네이버": ("035420", "AI"),
+    "카카오": ("035720", "AI"),
+    "LG에너지솔루션": ("373220", "AI"),
+    "포스코인터내셔널": ("047050", "AI"),
+    "엔케이맥스": ("058970", "AI"),
+    "엔에프씨": ("052860", "AI"),
+    "넥슨게임즈": ("225570", "AI"),
+    "카카오게임즈": ("293490", "AI"),
+    "삼성에스디에스": ("018260", "AI"),
+    "삼성SDS": ("018260", "AI"),
+    "삼보통상": ("000250", "AI"),
+    
+    # 의약품/바이오 관련주
+    "삼성바이오로직스": ("207940", "의약품"),
+    "셀트리온": ("068270", "의약품"),
+    "셀트리온헬스케어": ("091990", "의약품"),
+    "SK바이오팜": ("326030", "의약품"),
+    "알테오젠": ("196170", "의약품"),
+    "파마리서치": ("214450", "의약품"),
+    "휴젤": ("145020", "의약품"),
+    "유한양행": ("000100", "의약품"),
+    "한미약품": ("128940", "의약품"),
+    "종근당": ("185750", "의약품"),
+    "클래시스": ("214150", "의약품"),
+    "엔지켐생명과학": ("183490", "의약품"),
+    
+    # 양자컴퓨터/반도체 관련주
+    "삼성전자": ("005930", "양자컴퓨터"),
+    "SK하이닉스": ("000660", "양자컴퓨터"),
+    "삼성SDI": ("006400", "양자컴퓨터"),
+    "한미반도체": ("042700", "양자컴퓨터"),
+    "ISC": ("095340", "양자컴퓨터"),
+    "인텔리안테크": ("189300", "양자컴퓨터"),
+    "아프리카TV": ("067160", "양자컴퓨터"),
+    "안랩": ("053800", "양자컴퓨터"),
+    "주성엔지니어링": ("036930", "양자컴퓨터"),
+    "LX세미콘": ("108320", "양자컴퓨터"),
+    
+    # 기타 주요 종목
+    "LG화학": ("051910", "기타"),
+    "현대차": ("005380", "기타"),
+    "기아": ("000270", "기타"),
+    "POSCO홀딩스": ("005490", "기타"),
+    "포스코홀딩스": ("005490", "기타"),
+    "삼성물산": ("028260", "기타"),
+    "현대모비스": ("012330", "기타"),
+    "LG전자": ("066570", "기타"),
+    "SK이노베이션": ("096770", "기타"),
+    "LG": ("003550", "기타"),
+    "SK텔레콤": ("017670", "기타"),
+    "SK": ("034730", "기타"),
+    "KT&G": ("033780", "기타"),
+}
+
+def search_stock(query):
+    """기업명으로 종목코드와 섹터 검색"""
+    query = query.strip().upper()
+    
+    # 정확히 일치하는 경우
+    for name, (code, sector) in STOCK_DATABASE.items():
+        if name.upper() == query:
+            return code, name, sector
+    
+    # 부분 일치하는 경우
+    matches = []
+    for name, (code, sector) in STOCK_DATABASE.items():
+        if query in name.upper():
+            matches.append((code, name, sector))
+    
+    if matches:
+        return matches[0]  # 첫 번째 매치 반환
+    
+    return None, None, None
+
 # --- 스크리닝 엔진 클래스 ---
 class StockScreener:
     def __init__(self):
@@ -130,6 +208,95 @@ class StockScreener:
             return "데드크로스"
         
         return None
+
+    def analyze_stock(self, code, name, sector, data):
+        """개별 종목 상세 분석"""
+        try:
+            prices = data['close_prices']
+            
+            # RSI 계산
+            rsi = self.calculate_rsi(prices)
+            if rsi is None:
+                return None
+            
+            # MACD 계산
+            macd, signal, histogram = self.calculate_macd(prices)
+            if macd is None:
+                return None
+            
+            macd_cross = self.check_macd_crossover(prices)
+            
+            # 갭 계산
+            gap = ((data['open'] - data['prev_close']) / data['prev_close']) * 100
+            
+            # 거래량 급증 확인
+            volume_surge = False
+            if len(data['volumes']) >= 5:
+                avg_vol = sum(data['volumes'][-5:]) / 5
+                if data['volume'] >= avg_vol * 2.0:
+                    volume_surge = True
+            
+            # 매매 신호 및 추천 결정
+            signals = []
+            recommendation = "관망"
+            recommendation_color = "🟡"
+            
+            # 강력 매수 신호
+            if rsi <= 30 and macd_cross == "골든크로스":
+                signals.append("⭐ 강력 매수 신호")
+                recommendation = "적극 매수"
+                recommendation_color = "🟢"
+            
+            # 매수 신호
+            elif rsi <= 30:
+                signals.append("RSI 과매도 (반등 가능성)")
+                recommendation = "매수 고려"
+                recommendation_color = "🟢"
+            elif macd_cross == "골든크로스":
+                signals.append("MACD 골든크로스 (상승 전환)")
+                recommendation = "매수 고려"
+                recommendation_color = "🟢"
+            elif macd > 0 and rsi < 70:
+                signals.append("상승 추세 지속")
+                recommendation = "보유/추가 매수"
+                recommendation_color = "🟢"
+            
+            # 매도 신호
+            if rsi >= 70:
+                signals.append("RSI 과매수 (조정 가능성)")
+                recommendation = "매도 고려"
+                recommendation_color = "🔴"
+            if macd_cross == "데드크로스":
+                signals.append("MACD 데드크로스 (하락 전환)")
+                recommendation = "매도 고려"
+                recommendation_color = "🔴"
+            
+            # 추가 신호
+            if gap < -3:
+                signals.append(f"갭 하락 {gap:.1f}%")
+            if volume_surge:
+                signals.append("거래량 급증")
+            if macd > 0:
+                signals.append("MACD 0선 상단 (강세)")
+            
+            return {
+                'sector': sector,
+                'code': code,
+                'name': name,
+                'current': data['current'],
+                'change': ((data['current'] - data['prev_close']) / data['prev_close']) * 100,
+                'rsi': rsi,
+                'macd': macd,
+                'signal': signal,
+                'macd_cross': macd_cross,
+                'gap': gap,
+                'volume': data['volume'],
+                'signals': signals,
+                'recommendation': recommendation,
+                'recommendation_color': recommendation_color
+            }
+        except Exception as e:
+            return None
 
     def check_conditions(self, code, name, sector, data, selected_filters, params):
         """다중 조건 AND 로직 필터링"""
@@ -262,7 +429,7 @@ if check_password():
         """)
 
     # 탭 생성
-    tab1, tab2 = st.tabs(["📋 기본 종목 리스트", "✏️ 내 종목 추가"])
+    tab1, tab2, tab3 = st.tabs(["📋 기본 종목 리스트", "✏️ 내 종목 추가", "🔍 개별 종목 분석"])
     
     with tab1:
         st.info("AI, 의약품, 양자컴퓨터 관련 주요 종목을 분석합니다.")
@@ -322,7 +489,7 @@ if check_password():
                     if res:
                         results.append(res)
                 progress_bar.progress((i + 1) / len(stocks))
-                time.sleep(0.5)  # IP 차단 방지
+                time.sleep(0.5)
 
             status_text.empty()
             progress_bar.empty()
@@ -368,105 +535,310 @@ if check_password():
         st.info("관심 있는 종목을 직접 추가하여 분석할 수 있습니다.")
         
         # 종목 추가 UI
-        col1, col2, col3 = st.columns([2, 2, 1])
-        
-        with col1:
-            custom_code = st.text_input("종목코드", placeholder="예: 005930", key="custom_code")
-        with col2:
-            custom_name = st.text_input("종목명", placeholder="예: 삼성전자", key="custom_name")
-        with col3:
-            custom_sector = st.selectbox("섹터", ["AI", "의약품", "양자컴퓨터", "기타"], key="custom_sector")
+        company_search = st.text_input(
+            "🔍 기업명을 입력하세요", 
+            placeholder="예: 삼성전자, NAVER, 카카오",
+            help="기업명을 입력하면 종목코드와 섹터가 자동으로 검색됩니다."
+        )
         
         # 세션 상태에 커스텀 종목 리스트 저장
         if "custom_stocks" not in st.session_state:
             st.session_state.custom_stocks = []
         
-        col_btn1, col_btn2 = st.columns(2)
-        
-        with col_btn1:
-            if st.button("➕ 종목 추가", use_container_width=True):
-                if custom_code and custom_name:
-                    # 6자리 숫자 확인
-                    if custom_code.isdigit() and len(custom_code) == 6:
-                        st.session_state.custom_stocks.append((custom_code, custom_name, custom_sector))
-                        st.success(f"✅ {custom_name} ({custom_code}) 추가됨!")
-                        st.rerun()
-                    else:
-                        st.error("❌ 종목코드는 6자리 숫자여야 합니다.")
-                else:
-                    st.error("❌ 종목코드와 종목명을 모두 입력하세요.")
-        
-        with col_btn2:
-            if st.button("🗑️ 전체 삭제", use_container_width=True):
-                st.session_state.custom_stocks = []
-                st.success("모든 종목이 삭제되었습니다.")
-                st.rerun()
-        
-        # 현재 추가된 종목 표시
-        if st.session_state.custom_stocks:
-            st.divider()
-            st.subheader(f"📝 추가된 종목 ({len(st.session_state.custom_stocks)}개)")
+        if company_search:
+            code, name, sector = search_stock(company_search)
             
-            # 삭제 기능이 있는 테이블
-            for idx, (code, name, sector) in enumerate(st.session_state.custom_stocks):
-                col_info, col_del = st.columns([5, 1])
-                with col_info:
-                    st.text(f"{idx+1}. [{sector}] {name} ({code})")
-                with col_del:
-                    if st.button("❌", key=f"del_{idx}"):
-                        st.session_state.custom_stocks.pop(idx)
-                        st.rerun()
-            
-            st.divider()
-            
-            # 커스텀 종목 스크리닝 시작
-            if st.button("🔍 내 종목 스크리닝 시작", type="primary", key="custom_screen"):
-                results = []
+            if code:
+                st.success(f"✅ 찾음: **{name}** (종목코드: {code}, 섹터: {sector})")
                 
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+                col_add, col_analyze = st.columns(2)
                 
-                for i, (code, name, sector) in enumerate(st.session_state.custom_stocks):
-                    status_text.text(f"분석 중: {name} ({sector}) - ({i+1}/{len(st.session_state.custom_stocks)})")
-                    data = screener.get_stock_data(code)
-                    if data:
-                        res = screener.check_conditions(code, name, sector, data, selected_filters, params)
-                        if res:
-                            results.append(res)
-                    else:
-                        st.warning(f"⚠️ {name} ({code}) 데이터를 가져올 수 없습니다.")
-                    progress_bar.progress((i + 1) / len(st.session_state.custom_stocks))
-                    time.sleep(0.5)  # IP 차단 방지
-
-                status_text.empty()
-                progress_bar.empty()
+                with col_add:
+                    if st.button("➕ 관심종목에 추가", use_container_width=True, key="add_to_list"):
+                        # 중복 체크
+                        if not any(stock[0] == code for stock in st.session_state.custom_stocks):
+                            st.session_state.custom_stocks.append((code, name, sector))
+                            st.success(f"✅ {name}이(가) 관심종목에 추가되었습니다!")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ 이미 추가된 종목입니다.")
                 
-                if results:
-                    st.success(f"✅ 조건에 맞는 종목 **{len(results)}개**를 찾았습니다!")
-                    
-                    df_results = pd.DataFrame(results)
-                    
-                    st.dataframe(
-                        df_results,
-                        use_container_width=True,
-                        column_config={
-                            "섹터": st.column_config.TextColumn("섹터", width="small"),
-                            "종목코드": st.column_config.TextColumn("종목코드", width="small"),
-                            "종목명": st.column_config.TextColumn("종목명", width="medium"),
-                            "현재가": st.column_config.NumberColumn("현재가", format="%d원"),
-                            "등락율": st.column_config.TextColumn("등락율", width="small"),
-                            "RSI": st.column_config.TextColumn("RSI", width="small"),
-                            "MACD": st.column_config.TextColumn("MACD", width="small"),
-                            "Signal": st.column_config.TextColumn("Signal", width="small"),
-                            "매매신호": st.column_config.TextColumn("매매신호", width="large"),
-                            "거래량": st.column_config.NumberColumn("거래량", format="%d")
-                        }
-                    )
-                else:
-                    st.warning("⚠️ 조건에 부합하는 종목이 현재 없습니다.")
-                    st.info("💡 필터 조건을 조정하거나 다른 조합을 시도해보세요.")
+                with col_analyze:
+                    if st.button("📊 바로 분석하기", type="primary", use_container_width=True, key="analyze_now"):
+                        with st.spinner(f"{name} 분석 중..."):
+                            data = screener.get_stock_data(code)
+                            
+                            if data:
+                                analysis = screener.analyze_stock(code, name, sector, data)
+                                
+                                if analysis:
+                                    st.divider()
+                                    st.subheader(f"📈 {name} ({code}) 상세 분석")
+                                    
+                                    # 기본 정보
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    with col1:
+                                        st.metric("현재가", f"{int(analysis['current']):,}원")
+                                    with col2:
+                                        change_color = "normal" if analysis['change'] >= 0 else "inverse"
+                                        st.metric("등락율", f"{analysis['change']:.2f}%", delta=f"{analysis['change']:.2f}%", delta_color=change_color)
+                                    with col3:
+                                        st.metric("RSI", f"{analysis['rsi']:.1f}")
+                                    with col4:
+                                        st.metric("거래량", f"{int(analysis['volume']):,}")
+                                    
+                                    st.divider()
+                                    
+                                    # 매매 추천
+                                    st.subheader("💡 매매 추천")
+                                    rec_col1, rec_col2 = st.columns([1, 3])
+                                    with rec_col1:
+                                        st.markdown(f"## {analysis['recommendation_color']}")
+                                    with rec_col2:
+                                        st.markdown(f"### **{analysis['recommendation']}**")
+                                    
+                                    st.divider()
+                                    
+                                    # 기술적 지표
+                                    st.subheader("📊 기술적 지표")
+                                    indicator_col1, indicator_col2 = st.columns(2)
+                                    
+                                    with indicator_col1:
+                                        st.markdown("**RSI 분석**")
+                                        if analysis['rsi'] <= 30:
+                                            st.success(f"🟢 RSI {analysis['rsi']:.1f} - 과매도 구간 (반등 기회)")
+                                        elif analysis['rsi'] >= 70:
+                                            st.error(f"🔴 RSI {analysis['rsi']:.1f} - 과매수 구간 (조정 가능성)")
+                                        else:
+                                            st.info(f"🟡 RSI {analysis['rsi']:.1f} - 중립 구
+                                            with indicator_col2:
+                                    st.markdown("**MACD 분석**")
+                                    if analysis['macd_cross'] == "골든크로스":
+                                        st.success(f"🟢 골든크로스 발생 - 상승 추세 전환 신호")
+                                    elif analysis['macd_cross'] == "데드크로스":
+                                        st.error(f"🔴 데드크로스 발생 - 하락 추세 전환 신호")
+                                    elif analysis['macd'] > 0:
+                                        st.success(f"🟢 MACD {analysis['macd']:.2f} - 상승 추세")
+                                    else:
+                                        st.warning(f"🟡 MACD {analysis['macd']:.2f} - 하락 추세")
+                                
+                                # 감지된 신호들
+                                if analysis['signals']:
+                                    st.divider()
+                                    st.subheader("🎯 감지된 신호")
+                                    for signal in analysis['signals']:
+                                        st.markdown(f"- {signal}")
+                            else:
+                                st.error("분석 중 오류가 발생했습니다.")
+                        else:
+                            st.error(f"⚠️ {name} ({code}) 데이터를 가져올 수 없습니다.")
         else:
-            st.info("👆 위에서 종목을 추가해주세요.")
+            st.warning(f"⚠️ '{company_search}'에 대한 검색 결과가 없습니다.")
+            st.info("💡 종목코드를 직접 입력하시거나 다른 기업명을 시도해보세요.")
+    
+    st.divider()
+    
+    # 관심종목 리스트
+    if st.session_state.custom_stocks:
+        st.subheader(f"⭐ 내 관심종목 ({len(st.session_state.custom_stocks)}개)")
+        
+        if st.button("🗑️ 전체 삭제", use_container_width=False):
+            st.session_state.custom_stocks = []
+            st.success("모든 종목이 삭제되었습니다.")
+            st.rerun()
+        
+        # 관심종목 표시
+        for idx, (code, name, sector) in enumerate(st.session_state.custom_stocks):
+            col_info, col_del = st.columns([5, 1])
+            with col_info:
+                st.text(f"{idx+1}. [{sector}] {name} ({code})")
+            with col_del:
+                if st.button("❌", key=f"del_{idx}"):
+                    st.session_state.custom_stocks.pop(idx)
+                    st.rerun()
+        
+        st.divider()
+        
+        # 관심종목 일괄 스크리닝
+        if st.button("🔍 관심종목 일괄 스크리닝", type="primary", key="custom_screen"):
+            results = []
             
-else:
-    st.info("👈 사이드바에서 비밀번호를 입력하세요")
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for i, (code, name, sector) in enumerate(st.session_state.custom_stocks):
+                status_text.text(f"분석 중: {name} ({sector}) - ({i+1}/{len(st.session_state.custom_stocks)})")
+                data = screener.get_stock_data(code)
+                if data:
+                    res = screener.check_conditions(code, name, sector, data, selected_filters, params)
+                    if res:
+                        results.append(res)
+                else:
+                    st.warning(f"⚠️ {name} ({code}) 데이터를 가져올 수 없습니다.")
+                progress_bar.progress((i + 1) / len(st.session_state.custom_stocks))
+                time.sleep(0.5)
+
+            status_text.empty()
+            progress_bar.empty()
+            
+            if results:
+                st.success(f"✅ 조건에 맞는 종목 **{len(results)}개**를 찾았습니다!")
+                
+                df_results = pd.DataFrame(results)
+                
+                st.dataframe(
+                    df_results,
+                    use_container_width=True,
+                    column_config={
+                        "섹터": st.column_config.TextColumn("섹터", width="small"),
+                        "종목코드": st.column_config.TextColumn("종목코드", width="small"),
+                        "종목명": st.column_config.TextColumn("종목명", width="medium"),
+                        "현재가": st.column_config.NumberColumn("현재가", format="%d원"),
+                        "등락율": st.column_config.TextColumn("등락율", width="small"),
+                        "RSI": st.column_config.TextColumn("RSI", width="small"),
+                        "MACD": st.column_config.TextColumn("MACD", width="small"),
+                        "Signal": st.column_config.TextColumn("Signal", width="small"),
+                        "매매신호": st.column_config.TextColumn("매매신호", width="large"),
+                        "거래량": st.column_config.NumberColumn("거래량", format="%d")
+                    }
+                )
+            else:
+                st.warning("⚠️ 조건에 부합하는 종목이 현재 없습니다.")
+                st.info("💡 필터 조건을 조정하거나 다른 조합을 시도해보세요.")
+    else:
+        st.info("👆 위에서 기업명을 검색하여 관심종목에 추가해주세요.")
+
+with tab3:
+    st.info("종목 하나를 선택하여 상세 분석 및 매매 추천을 받아보세요.")
+    
+    # 개별 종목 분석
+    search_query = st.text_input(
+        "🔍 분석할 기업명 입력",
+        placeholder="예: 삼성전자, NAVER, 셀트리온",
+        key="individual_search"
+    )
+    
+    if search_query:
+        code, name, sector = search_stock(search_query)
+        
+        if code and st.button("📊 상세 분석 시작", type="primary"):
+            with st.spinner(f"{name} 데이터 수집 및 분석 중..."):
+                data = screener.get_stock_data(code)
+                
+                if data:
+                    analysis = screener.analyze_stock(code, name, sector, data)
+                    
+                    if analysis:
+                        st.divider()
+                        st.header(f"📈 {name} ({code}) 상세 분석 리포트")
+                        st.caption(f"섹터: {sector}")
+                        
+                        # 기본 정보
+                        st.subheader("💰 현재 시세")
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("현재가", f"{int(analysis['current']):,}원")
+                        with col2:
+                            change_color = "normal" if analysis['change'] >= 0 else "inverse"
+                            st.metric("등락율", f"{analysis['change']:.2f}%", delta=f"{analysis['change']:.2f}%", delta_color=change_color)
+                        with col3:
+                            st.metric("RSI", f"{analysis['rsi']:.1f}")
+                        with col4:
+                            st.metric("거래량", f"{int(analysis['volume']):,}")
+                        
+                        st.divider()
+                        
+                        # 매매 추천
+                        st.subheader("💡 AI 매매 추천")
+                        rec_container = st.container()
+                        with rec_container:
+                            rec_col1, rec_col2 = st.columns([1, 4])
+                            with rec_col1:
+                                st.markdown(f"# {analysis['recommendation_color']}")
+                            with rec_col2:
+                                st.markdown(f"## **{analysis['recommendation']}**")
+                                
+                                # 추천 근거 설명
+                                if analysis['recommendation'] == "적극 매수":
+                                    st.success("RSI 과매도 구간에서 MACD 골든크로스가 발생하여 강력한 반등 가능성이 있습니다.")
+                                elif analysis['recommendation'] == "매수 고려":
+                                    st.info("기술적 지표가 매수 신호를 보이고 있습니다. 분할 매수를 고려하세요.")
+                                elif analysis['recommendation'] == "매도 고려":
+                                    st.warning("기술적 지표가 과열 신호를 보이고 있습니다. 수익 실현을 고려하세요.")
+                                elif analysis['recommendation'] == "보유/추가 매수":
+                                    st.success("상승 추세가 지속되고 있습니다. 보유 중이라면 추가 매수도 고려해볼 수 있습니다.")
+                                else:
+                                    st.info("중립적인 상황입니다. 추가 신호를 기다리는 것이 좋습니다.")
+                        
+                        st.divider()
+                        
+                        # 기술적 지표 상세
+                        st.subheader("📊 기술적 지표 분석")
+                        
+                        indicator_col1, indicator_col2 = st.columns(2)
+                        
+                        with indicator_col1:
+                            st.markdown("### RSI (상대강도지수)")
+                            st.progress(int(analysis['rsi']))
+                            
+                            if analysis['rsi'] <= 30:
+                                st.success(f"🟢 **RSI {analysis['rsi']:.1f}** - 과매도 구간")
+                                st.write("• 시장이 공포에 질려 과하게 하락")
+                                st.write("• 반등 가능성이 높은 구간")
+                                st.write("• 분할 매수 적극 고려")
+                            elif analysis['rsi'] >= 70:
+                                st.error(f"🔴 **RSI {analysis['rsi']:.1f}** - 과매수 구간")
+                                st.write("• 시장이 지나치게 과열")
+                                st.write("• 조정 가능성 높음")
+                                st.write("• 매도 타이밍 고려")
+                            else:
+                                st.info(f"🟡 **RSI {analysis['rsi']:.1f}** - 중립 구간")
+                                st.write("• 정상적인 거래 범위")
+                                st.write("• 추세 확인 필요")
+                        
+                        with indicator_col2:
+                            st.markdown("### MACD (추세 분석)")
+                            st.write(f"**MACD Line**: {analysis['macd']:.2f}")
+                            st.write(f"**Signal Line**: {analysis['signal']:.2f}")
+                            
+                            if analysis['macd_cross'] == "골든크로스":
+                                st.success("🟢 **골든크로스 발생!**")
+                                st.write("• MACD가 Signal선을 상향 돌파")
+                                st.write("• 상승 추세로 전환 신호")
+                                st.write("• 매수 타이밍")
+                            elif analysis['macd_cross'] == "데드크로스":
+                                st.error("🔴 **데드크로스 발생!**")
+                                st.write("• MACD가 Signal선을 하향 돌파")
+                                st.write("• 하락 추세로 전환 신호")
+                                st.write("• 매도 타이밍")
+                            elif analysis['macd'] > 0:
+                                st.success(f"🟢 **상승 추세 (MACD > 0)**")
+                                st.write("• MACD가 0선 상단에 위치")
+                                st.write("• 강세장 지속 중")
+                            else:
+                                st.warning(f"🟡 **하락 추세 (MACD < 0)**")
+                                st.write("• MACD가 0선 하단에 위치")
+                                st.write("• 약세장 지속 중")
+                        
+                        # 추가 신호
+                        if analysis['signals']:
+                            st.divider()
+                            st.subheader("🎯 감지된 추가 신호")
+                            
+                            for signal in analysis['signals']:
+                                if "강력 매수" in signal:
+                                    st.success(f"⭐ {signal}")
+                                elif "RSI 과매도" in signal or "골든크로스" in signal:
+                                    st.success(f"🟢 {signal}")
+                                elif "RSI 과매수" in signal or "데드크로스" in signal:
+                                    st.error(f"🔴 {signal}")
+                                else:
+                                    st.info(f"🔵 {signal}")
+                    else:
+                        st.error("분석 중 오류가 발생했습니다.")
+                else:
+                    st.error(f"⚠️ {name} ({code}) 데이터를 가져올 수 없습니다.")
+        elif code:
+            st.success(f"✅ 찾음: **{name}** (종목코드: {code}, 섹터: {sector})")
+        else:
+            st.warning(f"⚠️ '{search_query}'에 대한 검색 결과가 없습니다.")
