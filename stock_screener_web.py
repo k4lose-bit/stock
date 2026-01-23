@@ -435,7 +435,7 @@ if check_password():
         st.info("AI, 의약품, 양자컴퓨터 관련 주요 종목을 분석합니다.")
         
         if st.button("🔍 스크리닝 시작 (기본 리스트)", type="primary", key="basic_screen"):
-            # 분석 대상 종목 리스트 (AI, 의약품, 양자컴퓨터 관련주)
+            # 분석 대상 종목 리스트
             stocks = [
                 # AI 관련주
                 ("035420", "NAVER", "AI"),
@@ -610,13 +610,14 @@ if check_password():
                                         elif analysis['rsi'] >= 70:
                                             st.error(f"🔴 RSI {analysis['rsi']:.1f} - 과매수 구간 (조정 가능성)")
                                         else:
-                                            st.info(f"🟡 RSI {analysis['rsi']:.1f} - 중립 구
-                                            with indicator_col2:
-                                    st.markdown("**MACD 분석**")
+                                            st.info(f"🟡 RSI {analysis['rsi']:.1f} - 중립 구간")
+                                    
+                                    with indicator_col2:
+                                        st.markdown("**MACD 분석**")
                                     if analysis['macd_cross'] == "골든크로스":
-                                        st.success(f"🟢 골든크로스 발생 - 상승 추세 전환 신호")
+                                        st.success("🟢 골든크로스 발생 - 상승 추세 전환 신호")
                                     elif analysis['macd_cross'] == "데드크로스":
-                                        st.error(f"🔴 데드크로스 발생 - 하락 추세 전환 신호")
+                                        st.error("🔴 데드크로스 발생 - 하락 추세 전환 신호")
                                     elif analysis['macd'] > 0:
                                         st.success(f"🟢 MACD {analysis['macd']:.2f} - 상승 추세")
                                     else:
@@ -812,11 +813,11 @@ with tab3:
                                 st.write("• 하락 추세로 전환 신호")
                                 st.write("• 매도 타이밍")
                             elif analysis['macd'] > 0:
-                                st.success(f"🟢 **상승 추세 (MACD > 0)**")
+                                st.success("🟢 **상승 추세 (MACD > 0)**")
                                 st.write("• MACD가 0선 상단에 위치")
                                 st.write("• 강세장 지속 중")
                             else:
-                                st.warning(f"🟡 **하락 추세 (MACD < 0)**")
+                                st.warning("🟡 **하락 추세 (MACD < 0)**")
                                 st.write("• MACD가 0선 하단에 위치")
                                 st.write("• 약세장 지속 중")
                         
