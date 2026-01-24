@@ -1,0 +1,36 @@
+name: Update KRX Stock List Daily
+
+   on:
+     schedule:
+       - cron: '0 0 * * *'  # 매일 자정 (UTC) 실행
+     workflow_dispatch:  # 수동 실행 버튼 활성화
+
+   jobs:
+     update-stock-list:
+       runs-on: ubuntu-latest
+       
+       steps:
+         - name: Checkout repository
+           uses: actions/checkout@v3
+           with:
+             token: ${{ secrets.GITHUB_TOKEN }}
+         
+         - name: Set up Python
+           uses: actions/setup-python@v4
+           with:
+             python-version: '3.10'
+         
+         - name: Install dependencies
+           run: |
+             pip install requests pandas openpyxl beautifulsoup4 lxml
+         
+         - name: Download and update KRX stock list
+           run: |
+             python update_stock_list.py
+         
+         - name: Commit and push if changed
+           run: |
+             git config --global user.name 'github-actions[bot]'
+             git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+             git add krx_stock_list.csv
+             git diff --quiet && git diff --staged --quiet || (git commit -m "🔄 Auto-update: KRX stock list $(date +'%Y-%m-%d %H:%M:%S')" && git push)
