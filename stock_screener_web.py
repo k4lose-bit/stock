@@ -92,28 +92,80 @@ STOCK_DATABASE = {
 }
 
 
+def search_stock_naver(query: str):
+    """
+    네이버 금융 검색을 이용해 종목코드/종목명/시장 구분을 찾아옴
+    - 성공: (code, name, sector) 반환
+    - 실패: (None, None, None)
+    """
+    if not query:
+        return None, None, None
+
+    q = query.strip()
+    try:
+        url = "https://finance.naver.com/search/searchList.naver"
+        res = requests.get(url, params={"query": q}, timeout=10)
+
+        # 네이버 금융은 euc-kr 인코딩인 경우가 많음
+        res.encoding = "euc-kr"
+
+        tables = pd.read_html(res.text)
+        if not tables:
+            return None, None, None
+
+        df = tables[0]
+        if df.empty:
+            return None, None, None
+
+        # 컬럼명 안전 탐색
+        col_name = None
+        col_code = None
+        for c in df.columns:
+            sc = str(c)
+            if "종목명" in sc:
+                col_name = c
+            if "종목코드" in sc:
+                col_code = c
+
+        if col_name is None or col_code is None:
+            return None, None, None
+
+        name = str(df.iloc[0][col_name]).strip()
+        code = str(df.iloc[0][col_code]).strip().zfill(6)
+
+        # 여기서는 일단 기타로 두고, 나중에 업종 분류 로직 추가 가능
+        sector = "기타"
+        return code, name, sector
+
+    except Exception:
+        return None, None, None
+
+
 def search_stock(query: str):
-    """기업명으로 종목코드와 섹터 검색"""
+    """
+    1) 내장 DB에서 먼저 찾고
+    2) 없으면 네이버 금융 검색으로 전체 종목 자동 검색
+    """
     if not query:
         return None, None, None
 
     q = query.strip().upper()
 
-    # 정확 일치
+    # 1) 내장 DB 정확 일치
     for name, (code, sector) in STOCK_DATABASE.items():
         if name.upper() == q:
             return code, name, sector
 
-    # 부분 일치(첫 매칭 반환)
+    # 1) 내장 DB 부분 일치(첫 매칭)
     matches = []
     for name, (code, sector) in STOCK_DATABASE.items():
         if q in name.upper():
             matches.append((code, name, sector))
-
     if matches:
         return matches[0]
 
-    return None, None, None
+    # 2) 네이버 금융 검색으로 자동 확장
+    return search_stock_naver(query)
 
 
 # =============================
@@ -780,3 +832,4 @@ if check_password():
                                         st.markdown(f"- {sig}")
 else:
     st.info("🔒 왼쪽 사이드바에서 비밀번호로 로그인해 주세요.")
+
