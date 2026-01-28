@@ -177,6 +177,8 @@ def parse_ohlcv_csv(file) -> dict | None:
     """
     try:
         df = pd.read_csv(file)
+        print(f"[INFO] Parsing OHLCV CSV: {file.name if hasattr(file, 'name') else 'unknown'}")
+        print(f"[INFO] Columns found: {df.columns.tolist()}")
 
         # 컬럼 표준화
         cols = {c.lower(): c for c in df.columns}
@@ -192,7 +194,10 @@ def parse_ohlcv_csv(file) -> dict | None:
         c_vol = pick("volume", "거래량")
 
         if c_close is None or c_vol is None:
+            print(f"[ERROR] Missing required columns. Need 'close' and 'volume'")
             return None
+
+        print(f"[INFO] Mapped columns - close: {c_close}, volume: {c_vol}, open: {c_open}, date: {c_date}")
 
         # 날짜 정렬(있으면)
         if c_date is not None:
@@ -203,6 +208,7 @@ def parse_ohlcv_csv(file) -> dict | None:
         vols = df[c_vol].astype(float).tolist()
 
         if len(closes) < 35:  # MACD 계산 최소 길이
+            print(f"[ERROR] Not enough data rows: {len(closes)} (need at least 35)")
             return None
 
         current = float(closes[-1])
@@ -214,6 +220,7 @@ def parse_ohlcv_csv(file) -> dict | None:
         else:
             openp = prev_close  # open이 없으면 대충 prev_close로
 
+        print(f"[SUCCESS] OHLCV parsed successfully. Rows: {len(closes)}, Current: {current}")
         return {
             "current": current,
             "open": openp,
@@ -222,7 +229,8 @@ def parse_ohlcv_csv(file) -> dict | None:
             "close_prices": closes,
             "volumes": vols,
         }
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] Failed to parse OHLCV CSV: {str(e)}")
         return None
 
 
@@ -274,7 +282,8 @@ class StockScreener:
                 "close_prices": closes,
                 "volumes": vols,
             }
-        except Exception:
+        except Exception as e:
+            print(f"[ERROR] Live data fetch failed ({code}): {str(e)}")
             return None
 
     def get_stock_data(self, code: str) -> dict | None:
@@ -283,12 +292,20 @@ class StockScreener:
         1) 업로드된 오프라인 데이터가 있으면 그걸 우선
         2) 없으면 라이브 시도
         """
+        # 오프라인 데이터 확인 (더 명확한 로깅)
         offline_map = st.session_state.get("offline_price_data", {})
         if isinstance(offline_map, dict) and code in offline_map:
+            print(f"[INFO] Using offline data: {code}")
             return offline_map[code]
 
         # 라이브 시도
-        return self.get_stock_data_live(code)
+        print(f"[INFO] Attempting live data fetch: {code}")
+        live_data = self.get_stock_data_live(code)
+        if live_data:
+            print(f"[SUCCESS] Live data fetch successful: {code}")
+        else:
+            print(f"[WARNING] Live data fetch failed: {code}")
+        return live_data
 
     def calculate_rsi(self, prices, period=14):
         if len(prices) < period + 1:
