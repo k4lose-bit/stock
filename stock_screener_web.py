@@ -1,10 +1,7 @@
 <div style="border: 1px solid #d3d3d3; padding: 15px; border-radius: 5px; font-family: monospace; line-height: 1.5; background-color: transparent; white-space: pre; overflow-x: auto;">
-import streamlit as st
-import pandas as pd
-import hashlib
-import time
 
 방금 우리가 만든 3명의 직원(모듈)을 불러옵니다!
+</div>
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates, parse_ohlcv_csv
 from modules.analyzer import StockAnalyzer
 
