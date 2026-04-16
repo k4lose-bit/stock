@@ -95,56 +95,72 @@ else:
 
     tab1, tab2, tab3 = st.tabs(["🔍 종목 분석", "⭐ 내 관심종목", "⚙️ 관리"])
 
-    # --- 공통 리포트 함수 (RSI 완벽 방어) ---
+    # --- 공통 리포트 함수 (AI 분석 및 RSI 완벽 복구) ---
     def render_report(item, key_suffix):
-        data = fetcher.get_stock_data(item['code'])
-        if not data:
-            st.error("해당 종목의 데이터를 불러오지 못했습니다.")
-            return
+        with st.spinner("AI가 차트 및 기술적 지표를 분석 중입니다..."):
+            data = fetcher.get_stock_data(item['code'])
+            if not data:
+                st.error("해당 종목의 데이터를 불러오지 못했습니다.")
+                return
 
-        an_raw = analyzer.analyze(item['code'], item['name'], "기타", data)
-        an = an_raw if isinstance(an_raw, dict) else {}
+            # AI 분석 엔진 호출
+            an_raw = analyzer.analyze(item['code'], item['name'], "기타", data)
+            
+            # 🌟 에러 방어벽을 너무 높게 쳐서 막혀버린 AI 분석 결과를 부드럽게 변환
+            an = {}
+            if isinstance(an_raw, dict):
+                an = an_raw
+            elif isinstance(an_raw, str):
+                try:
+                    an = json.loads(an_raw)
+                except:
+                    # JSON 형태가 아닌 그냥 일반 텍스트로 답변을 줬을 경우
+                    an = {"recommendation": an_raw, "details": []}
 
-        st.divider()
-        st.subheader(f"📊 {item['name']} ({item['code']}) 실시간 리포트")
-        
-        curr, prev = data['current'], data['prev_close']
-        diff, chg = curr - prev, ((curr - prev) / prev) * 100
-        p_unit = "$" if curr < 1000 else "원"
-        
-        # 🌟 에러가 났던 부분: RSI 값이 없어도 멈추지 않게 완벽 처리
-        rsi_val = an.get('rsi')
-        if isinstance(rsi_val, (int, float)):
-            rsi_display = f"{rsi_val:.1f}"
-        else:
-            rsi_display = "계산불가"
-        
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            color = "red" if diff > 0 else "blue"
-            arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "")
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">현재가</div><div class="metric-value">{curr:,.2f}{p_unit}</div><div class="metric-delta {color}">{arrow} {abs(diff):,.2f}</div></div>""", unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">등락률</div><div class="metric-value">{chg:+.2f}%</div></div>""", unsafe_allow_html=True)
-        with c3:
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">RSI (14일)</div><div class="metric-value">{rsi_display}</div></div>""", unsafe_allow_html=True)
-        with c4:
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">거래량</div><div class="metric-value">{int(data['volume']):,}</div></div>""", unsafe_allow_html=True)
+            st.divider()
+            st.subheader(f"📊 {item['name']} ({item['code']}) 실시간 리포트")
+            
+            curr, prev = data['current'], data['prev_close']
+            diff, chg = curr - prev, ((curr - prev) / prev) * 100
+            p_unit = "$" if curr < 1000 else "원"
+            
+            # 🌟 RSI 값 복구: 문자로 들어오든 숫자로 들어오든 부드럽게 소수점으로 변환!
+            rsi_raw = an.get('rsi')
+            try:
+                rsi_display = f"{float(rsi_raw):.1f}"
+            except:
+                # 아예 값이 안 넘어왔을 때만 계산불가 처리
+                rsi_display = str(rsi_raw) if rsi_raw else "계산불가"
+            
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                color = "red" if diff > 0 else "blue"
+                arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "")
+                st.markdown(f"""<div class="metric-card"><div class="metric-title">현재가</div><div class="metric-value">{curr:,.2f}{p_unit}</div><div class="metric-delta {color}">{arrow} {abs(diff):,.2f}</div></div>""", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"""<div class="metric-card"><div class="metric-title">등락률</div><div class="metric-value">{chg:+.2f}%</div></div>""", unsafe_allow_html=True)
+            with c3:
+                st.markdown(f"""<div class="metric-card"><div class="metric-title">RSI (14일)</div><div class="metric-value">{rsi_display}</div></div>""", unsafe_allow_html=True)
+            with c4:
+                st.markdown(f"""<div class="metric-card"><div class="metric-title">거래량</div><div class="metric-value">{int(data['volume']):,}</div></div>""", unsafe_allow_html=True)
 
-        st.info(f"💡 **AI 분석 의견:** {an.get('recommendation', '데이터 부족으로 의견을 생성할 수 없습니다.')}")
-        for detail in an.get('details', []):
-            st.write(f"- {detail}")
+            # 🌟 AI 의견 복구: 기존에 잘 나오던 문구 복원
+            rec = an.get('recommendation') or an.get('opinion') or "AI 분석 엔진에서 응답을 받지 못했습니다. (API 제한 등 일시적 오류)"
+            st.info(f"💡 **AI 분석 의견:** {rec}")
+            
+            for detail in an.get('details', []):
+                st.write(f"- {detail}")
 
-        is_fav = any(s['code'] == item['code'] for s in st.session_state.custom_stocks)
-        if not is_fav:
-            if st.button("➕ 내 관심종목에 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True, type="primary"):
-                st.session_state.custom_stocks.append(item)
-                save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
-                st.rerun()
+            is_fav = any(s['code'] == item['code'] for s in st.session_state.custom_stocks)
+            if not is_fav:
+                if st.button("➕ 내 관심종목에 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True, type="primary"):
+                    st.session_state.custom_stocks.append(item)
+                    save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
+                    st.rerun()
 
     # --- 탭 내용 ---
     with tab1:
-        query = st.text_input("종목명/티커 입력", placeholder="예: 쏠리드, 삼성전자, AAPL 등")
+        query = st.text_input("종목명/티커 입력", placeholder="예: 휴림로봇, 삼성전자, AAPL 등")
         if query:
             cands = search_candidates(query)
             if not cands.empty:
