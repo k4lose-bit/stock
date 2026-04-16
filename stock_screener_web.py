@@ -66,7 +66,12 @@ if check_password():
                 options = [f"{row['회사명']} ({row['종목코드']})" for _, row in cands.iterrows()]
                 pick = st.selectbox("✅ 후보 선택", options, key="add_pick")
                 idx = options.index(pick)
-                code = str(cands.iloc[idx]["종목코드"]).zfill(6)
+                
+                # BUG FIX: 미국 영문 티커는 0으로 채우지 않도록 예외 처리
+                code = str(cands.iloc[idx]["종목코드"])
+                if code.isdigit():
+                    code = code.zfill(6)
+                
                 name = str(cands.iloc[idx]["회사명"])
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
@@ -142,20 +147,26 @@ if check_password():
                 opts = [f"{row['회사명']} ({row['종목코드']})" for _, row in cands.iterrows()]
                 pick = st.selectbox("✅ 후보 선택", opts, key="single_pick")
                 idx = opts.index(pick)
-                code = str(cands.iloc[idx]["종목코드"]).zfill(6)
+                
+                # BUG FIX: 미국 영문 티커는 0으로 채우지 않도록 예외 처리
+                code = str(cands.iloc[idx]["종목코드"])
+                if code.isdigit():
+                    code = code.zfill(6)
+                
                 name = str(cands.iloc[idx]["회사명"])
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
                 if st.button("📊 상세 분석 시작", type="primary"):
                     with st.spinner(f"{name} 데이터를 분석하고 최신 뉴스를 가져오는 중..."):
                         data = fetcher.get_stock_data(code)
-                        news_list = fetcher.get_company_news(name) # 뉴스 호출!
+                        news_list = fetcher.get_company_news(name)
                         
                         if data:
                             an = analyzer.analyze(code, name, sector, data)
                             if an:
                                 st.header(f"📈 {name} 상세 분석 리포트")
                                 c1, c2, c3, c4 = st.columns(4)
+                                # 미국 주식(1000 이하 달러 단위)일 경우 $ 표시로 렌더링
                                 c1.metric("현재가", f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f}")
                                 c2.metric("등락율", f"{an['change']:.2f}%")
                                 c3.metric("RSI", f"{an['rsi']:.1f}")
@@ -163,23 +174,20 @@ if check_password():
                                 
                                 st.divider()
                                 
-                                # 🌟 상세 설명 부분
                                 st.subheader("💡 종합 지표 분석 의견")
                                 st.markdown(f"### {an['recommendation_color']} **{an['recommendation']}**")
                                 for detail in an['details']:
-                                    st.info(detail) # 예쁜 박스 형태로 텍스트 출력
+                                    st.info(detail)
                                 
                                 st.divider()
 
-                                # 📰 뉴스 부분
                                 st.subheader(f"📰 '{name}' 관련 최신 뉴스")
                                 if news_list:
                                     for news in news_list:
-                                        # 마크다운을 이용해 클릭 가능한 링크로 표시
                                         st.markdown(f"🔗 [{news['title']}]({news['link']})")
                                 else:
                                     st.write("관련 뉴스를 불러오지 못했거나 최근 이슈가 없습니다.")
                         else:
-                            st.error("데이터를 가져올 수 없습니다.")
+                            st.error("데이터를 가져올 수 없습니다. 종목 코드나 네트워크 상태를 확인해주세요.")
 else:
     st.info("🔒 로그인해 주세요.")
