@@ -40,7 +40,6 @@ def get_company_news(company_name, limit=5):
         print(f"[ERROR] 뉴스 가져오기 실패: {e}")
         return []
 
-# 🌟 새롭게 추가된 기능: 폭넓은 기업 데이터 수집 및 한글 자동 번역
 @st.cache_data(ttl=3600*24)
 def get_company_profile(code):
     try:
@@ -58,7 +57,6 @@ def get_company_profile(code):
         raw_industry = info.get("industry", "알 수 없음")
         raw_summary = info.get("longBusinessSummary", "기업 개요 데이터가 제공되지 않습니다.")
         
-        # 구글 번역기를 이용해 영문을 한글로 변환
         translator = GoogleTranslator(source='auto', target='ko')
         
         try:
@@ -272,7 +270,6 @@ if check_password():
                                 
                                 st.divider()
                                 
-                                # 🌟 한글 번역이 적용된 폭넓은 펀더멘탈 요약 
                                 st.subheader("🏢 기업 개요 및 펀더멘탈 (한글 번역)")
                                 if profile:
                                     st.markdown(f"**섹터:** {profile['sector']} &nbsp;|&nbsp; **산업군:** {profile['industry']}")
@@ -318,7 +315,11 @@ if check_password():
                                 
                                 st.divider()
 
-                                st.subheader(f"📰 '{name}' 최근 1주일 주요 뉴스")
+                                # 🌟 새롭게 추가된 주달(Judal) 연동 버튼
+                                st.subheader(f"📰 '{name}' 주요 이슈 및 투자분석")
+                                judal_search_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(name)}+투자분석"
+                                st.info(f"💡 **AI 테마 및 추가 분석 확인하기:** [👉 주달(Judal)에서 '{name}' 분석 결과 보기]({judal_search_url})")
+
                                 if news_list:
                                     for news in news_list:
                                         st.markdown(f"🔗 [{news['title']}]({news['link']})")
