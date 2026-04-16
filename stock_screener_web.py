@@ -6,6 +6,7 @@ import yfinance as yf
 import urllib.parse
 import requests
 import xml.etree.ElementTree as ET
+from deep_translator import GoogleTranslator
 
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
@@ -39,7 +40,7 @@ def get_company_news(company_name, limit=5):
         print(f"[ERROR] 뉴스 가져오기 실패: {e}")
         return []
 
-# 🌟 새롭게 추가된 기능: 기업 개요 및 테마 정보 가져오기
+# 🌟 새롭게 추가된 기능: 폭넓은 기업 데이터 수집 및 한글 자동 번역
 @st.cache_data(ttl=3600*24)
 def get_company_profile(code):
     try:
@@ -53,11 +54,33 @@ def get_company_profile(code):
             stock = yf.Ticker(code)
             info = stock.info
             
+        raw_sector = info.get("sector", "알 수 없음")
+        raw_industry = info.get("industry", "알 수 없음")
+        raw_summary = info.get("longBusinessSummary", "기업 개요 데이터가 제공되지 않습니다.")
+        
+        # 구글 번역기를 이용해 영문을 한글로 변환
+        translator = GoogleTranslator(source='auto', target='ko')
+        
+        try:
+            ko_sector = translator.translate(raw_sector) if raw_sector != "알 수 없음" else raw_sector
+            ko_industry = translator.translate(raw_industry) if raw_industry != "알 수 없음" else raw_industry
+            ko_summary = translator.translate(raw_summary) if raw_summary != "기업 개요 데이터가 제공되지 않습니다." else raw_summary
+        except Exception:
+            ko_sector = raw_sector
+            ko_industry = raw_industry
+            ko_summary = raw_summary + "\n\n(일시적인 번역기 오류로 원문을 제공합니다.)"
+            
         return {
-            "sector": info.get("sector", "알 수 없음"),
-            "industry": info.get("industry", "알 수 없음"),
-            "summary": info.get("longBusinessSummary", "기업 개요 데이터가 제공되지 않는 종목입니다."),
-            "website": info.get("website", "")
+            "sector": ko_sector,
+            "industry": ko_industry,
+            "summary": ko_summary,
+            "website": info.get("website", ""),
+            "marketCap": info.get("marketCap", 0),
+            "pe": info.get("trailingPE", 0),
+            "eps": info.get("trailingEps", 0),
+            "div_yield": info.get("dividendYield", 0),
+            "high52": info.get("fiftyTwoWeekHigh", 0),
+            "low52": info.get("fiftyTwoWeekLow", 0)
         }
     except Exception:
         return None
@@ -80,7 +103,7 @@ def check_password():
     return True
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
-st.title("🚀 Stock Screener Pro (상세분석 + 뉴스 📰)")
+st.title("🚀 Stock Screener Pro (상세분석 + 한글 번역 📰)")
 
 if "custom_stocks" not in st.session_state:
     st.session_state.custom_stocks = []
@@ -229,10 +252,10 @@ if check_password():
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
                 if st.button("📊 상세 분석 시작", type="primary"):
-                    with st.spinner(f"{name} 기업 정보 및 데이터를 가져오는 중..."):
+                    with st.spinner(f"{name} 기업 한글 번역 및 데이터를 가져오는 중... (약 5초 소요)"):
                         data = fetcher.get_stock_data(code)
                         news_list = get_company_news(name)
-                        profile = get_company_profile(code) # 기업 정보 호출
+                        profile = get_company_profile(code)
                         
                         if data:
                             an = analyzer.analyze(code, name, sector, data)
@@ -249,13 +272,39 @@ if check_password():
                                 
                                 st.divider()
                                 
-                                # 🌟 새롭게 추가된 기업 개요 섹션
-                                st.subheader("🏢 기업 개요 및 섹터 정보")
+                                # 🌟 한글 번역이 적용된 폭넓은 펀더멘탈 요약 
+                                st.subheader("🏢 기업 개요 및 펀더멘탈 (한글 번역)")
                                 if profile:
-                                    st.markdown(f"**섹터(Sector):** {profile['sector']} &nbsp;|&nbsp; **산업(Industry):** {profile['industry']}")
+                                    st.markdown(f"**섹터:** {profile['sector']} &nbsp;|&nbsp; **산업군:** {profile['industry']}")
                                     if profile['website']:
                                         st.markdown(f"**웹사이트:** [{profile['website']}]({profile['website']})")
-                                    # 영문/국문이 섞여 나올 수 있는 비즈니스 요약
+                                    
+                                    st.markdown("**📊 주요 재무/시장 지표**")
+                                    f1, f2, f3, f4, f5 = st.columns(5)
+                                    
+                                    mc = profile.get('marketCap', 0)
+                                    if mc > 0:
+                                        if code.isdigit():
+                                            mc_str = f"{mc // 100000000:,}억 원"
+                                        else:
+                                            mc_str = f"${mc // 1000000:,}M"
+                                    else:
+                                        mc_str = "N/A"
+                                        
+                                    f1.metric("시가총액", mc_str)
+                                    f2.metric("PER", f"{profile['pe']:.2f}" if profile['pe'] else "N/A")
+                                    f3.metric("EPS", f"{profile['eps']:.2f}" if profile['eps'] else "N/A")
+                                    
+                                    dy = profile['div_yield']
+                                    f4.metric("배당수익률", f"{dy*100:.2f}%" if dy else "N/A")
+                                    
+                                    h52 = profile['high52']
+                                    l52 = profile['low52']
+                                    if h52 and l52:
+                                        f5.metric("52주 고/저", f"{l52:.1f} ~ {h52:.1f}")
+                                    else:
+                                        f5.metric("52주 고/저", "N/A")
+
                                     st.info(profile['summary'])
                                 else:
                                     st.write("해당 기업의 개요 정보를 불러올 수 없습니다.")
@@ -265,11 +314,10 @@ if check_password():
                                 st.subheader("💡 종합 지표 분석 의견")
                                 st.markdown(f"### {an['recommendation_color']} **{an['recommendation']}**")
                                 for detail in an['details']:
-                                    st.success(detail) # 색상을 조금 더 눈에 띄게 변경
+                                    st.success(detail)
                                 
                                 st.divider()
 
-                                # 📰 뉴스는 다시 링크 형태로 원상복구
                                 st.subheader(f"📰 '{name}' 최근 1주일 주요 뉴스")
                                 if news_list:
                                     for news in news_list:
