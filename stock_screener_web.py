@@ -1,19 +1,23 @@
 import streamlit as st
 import pandas as pd
-import json
+import hashlib
 import time
 import urllib.parse
 from datetime import datetime
+from deep_translator import GoogleTranslator
 import yfinance as yf
-import gspread
 import requests
 import xml.etree.ElementTree as ET
+
+# 💡 구글 시트 연동을 위한 라이브러리 추가
+import json
+import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-from modules.data_fetcher import DataFetcher, search_candidates
+from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# --- [1. DB 및 외부 데이터 설정] ---
+# --- [🌟 구글 시트 데이터 동기화 함수 시작] ---
 @st.cache_resource(ttl=300)
 def get_db_sheet():
     try:
@@ -23,14 +27,65 @@ def get_db_sheet():
         client = gspread.authorize(creds)
         return client.open("StockScreener_DB").sheet1
     except Exception as e:
-        st.error(f"❌ 데이터베이스 연결 실패: {e}")
         return None
+
+def sync_load_favs(sheet):
+    try:
+        records = sheet.get_all_records()
+        for row in records:
+            # 단일 비밀번호 체계이므로 'Admin'이라는 고유 이름으로 저장/불러오기
+            if str(row.get('Nickname', '')) == 'Admin':
+                return json.loads(row.get('Favorites', "[]"))
+    except: pass
+    return []
+
+def sync_save_favs(sheet, fav_list):
+    try:
+        fav_json = json.dumps(fav_list, ensure_ascii=False)
+        records = sheet.get_all_records()
+        
+        # 시트가 아예 비어있으면 헤더부터 생성
+        if not records:
+            sheet.append_row(['Nickname', 'PIN', 'Favorites'])
+            sheet.append_row(['Admin', '1234', fav_json])
+            return
+            
+        for idx, row in enumerate(records):
+            if str(row.get('Nickname', '')) == 'Admin':
+                sheet.update_cell(idx + 2, 3, fav_json)
+                return
+                
+        # Admin 기록이 없으면 추가
+        sheet.append_row(['Admin', '1234', fav_json])
+    except: pass
+# --- [🌟 구글 시트 데이터 동기화 함수 끝] ---
+
+st.set_page_config(page_title="Stock Screener Pro", layout="wide")
+
+st.markdown('<meta name="format-detection" content="telephone=no">', unsafe_allow_html=True)
+st.markdown("""
+<style>
+div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
+.metric-card { background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
+.metric-title { color: #616161; font-size: 1.0rem; font-weight: 600; margin-bottom: 8px; }
+.metric-value { color: #212121; font-size: 1.9rem; font-weight: 800; }
+.metric-delta.red { color: #f44336; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+.metric-delta.blue { color: #2196f3; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+.metric-delta.gray { color: #9e9e9e; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+.metric-caption { color: #9e9e9e; font-size: 0.85rem; margin-top: 5px; }
+.custom-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.custom-table th, .custom-table td { border-bottom: 1px solid #eeeeee; padding: 12px 8px; text-align: center; font-size: 0.95rem; }
+.custom-table th { background-color: #f8f9fa; color: #424242; font-weight: bold; }
+.guide-box { background-color: #f0f7ff; border-left: 5px solid #1E90FF; padding: 15px; border-radius: 5px; margin-top: 15px; font-size: 0.95rem; }
+</style>
+""", unsafe_allow_html=True)
+
+CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
 
 @st.cache_data(ttl=3600)
 def get_exchange_rate():
     try:
-        rate = yf.Ticker("USDKRW=X").history(period="1d")
-        return float(rate['Close'].iloc[-1])
+        return float(yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1])
     except: return 1420.0
 
 @st.cache_data(ttl=3600)
@@ -42,175 +97,263 @@ def get_company_news(company_name):
         return [{"title": i.find('title').text, "link": i.find('link').text} for i in root.findall('.//item')[:5]]
     except: return []
 
-# --- [2. 사용자 데이터 관리 함수] ---
-def load_user_favs(sheet, nickname, pin):
-    try:
-        records = sheet.get_all_records()
-        for row in records:
-            if str(row.get('Nickname')) == nickname:
-                if str(row.get('PIN')) == pin:
-                    return row.get('Favorites', "[]")
-                else: return "AUTH_FAIL"
-        return "NEW_USER"
-    except: return "[]"
+def draw_card(title, value_str, diff_val, diff_str, caption=""):
+    color_cls = "red" if diff_val > 0 else ("blue" if diff_val < 0 else "gray")
+    arrow = "▲ " if diff_val > 0 else ("▼ " if diff_val < 0 else "")
+    delta_html = f"<div class='metric-delta {color_cls}'>{arrow}{diff_str}</div>" if diff_str else ""
+    caption_html = f"<div class='metric-caption'>{caption}</div>" if caption else ""
+    return f"""
+    <div class="metric-card">
+        <div class="metric-title">{title}</div>
+        <div class="metric-value">{value_str}</div>
+        {delta_html}
+        {caption_html}
+    </div>
+    """
 
-def save_user_favs(sheet, nickname, pin, favorites_list):
-    try:
-        fav_json = json.dumps(favorites_list, ensure_ascii=False)
-        records = sheet.get_all_records()
-        for idx, row in enumerate(records):
-            if str(row.get('Nickname')) == nickname:
-                sheet.update_cell(idx + 2, 3, fav_json)
-                return
-        sheet.append_row([nickname, pin, fav_json])
-    except Exception as e:
-        st.error(f"⚠️ 저장 중 오류 발생: {e}")
+def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
+    data = fetcher.get_stock_data(item['code'])
+    if not data:
+        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드(티커)나 네트워크를 확인해주세요.")
+        return
 
-# --- [3. 앱 설정 및 스타일] ---
-st.set_page_config(page_title="Stock Screener Pro", layout="wide")
-st.markdown("""
-<style>
-    div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
-    .metric-card { background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 15px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .metric-title { color: #616161; font-size: 0.9rem; font-weight: 600; }
-    .metric-value { color: #212121; font-size: 1.6rem; font-weight: 800; margin: 5px 0; }
-    .red { color: #f44336; font-weight: bold; }
-    .blue { color: #2196f3; font-weight: bold; }
-    .stTable td { text-align: center !important; font-size: 0.85rem; }
-</style>
-""", unsafe_allow_html=True)
-
-# --- [4. 리포트 렌더링 함수 (복구 및 통합)] ---
-def render_full_report(item, fetcher, analyzer, exc_rate, sheet, user, key_suffix):
-    with st.spinner(f"{item['name']} 분석 리포트 생성 중..."):
-        data = fetcher.get_stock_data(item['code'])
-        if not data:
-            st.error("⚠️ 데이터를 불러올 수 없습니다.")
-            return
-
-        # 분석 수행 (RSI, MACD, 볼린저밴드 등 포함됨)
-        an = analyzer.analyze(item['code'], item['name'], "기타", data)
-        news = get_company_news(item['name'])
-
-        st.divider()
-        st.subheader(f"📊 {item['name']} ({item['code']}) 상세 리포트")
-
-        # 상단 주요 지표 (4컬럼)
-        curr, prev = data['current'], data['prev_close']
-        diff, chg = curr - prev, ((curr - prev) / prev) * 100
-        p_unit = "$" if curr < 1000 else "원"
-        color = "red" if diff > 0 else "blue"
+    an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
+    if not an:
+        st.warning("⚠️ 상장 기간이 너무 짧거나 데이터가 부족하여 분석 지표를 계산할 수 없습니다.")
+        return
         
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            conv_txt = f" (약 {int(curr * exc_rate):,}원)" if p_unit == "$" else ""
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">현재가</div><div class="metric-value">{curr:,.2f}{p_unit}</div><div class="{color}">{diff:+,.2f} ({chg:+.2f}%)</div><div style="font-size:0.8rem; color:gray;">{conv_txt}</div></div>""", unsafe_allow_html=True)
-        with c2:
-            rsi_val = an.get('rsi', 0)
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">RSI (14)</div><div class="metric-value">{rsi_val:.1f}</div><div style="font-size:0.8rem; color:gray;">100 기준</div></div>""", unsafe_allow_html=True)
-        with c3:
-            # 볼린저 밴드 또는 거래량
-            vol = int(data['volume'])
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">당일 거래량</div><div class="metric-value">{vol:,}</div><div style="font-size:0.8rem; color:gray;">주(Share)</div></div>""", unsafe_allow_html=True)
-        with c4:
-            # 추천 등급
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">AI 의견</div><div class="metric-value" style="font-size:1.2rem;">{an.get('recommendation', '분석중')}</div><div>{an.get('recommendation_color', '')}</div></div>""", unsafe_allow_html=True)
+    news = get_company_news(item['name'])
+    
+    st.subheader(f"📈 {item['name']} ({item['code']}) 리포트")
+    
+    curr, prev = data['current'], data['prev_close']
+    diff = curr - prev
+    chg = (diff / prev) * 100
+    
+    c1, c2, c3, c4 = st.columns(4)
+    p_unit = "원" if curr > 1000 else "$"
+    
+    curr_txt = f"{curr:,.2f}" if p_unit == "$" else f"{int(curr):,}"
+    diff_txt = f"{diff:+,.2f}" if p_unit == "$" else f"{int(diff):+,}"
+    conv_txt = f"약 {int(curr * exc_rate):,}원" if p_unit == "$" else ""
+    
+    c1.markdown(draw_card("현재가", f"{curr_txt}{p_unit}", diff, f"{diff_txt}{p_unit}", conv_txt), unsafe_allow_html=True)
+    c2.markdown(draw_card("등락률", f"{chg:+.2f}%", diff, ""), unsafe_allow_html=True)
+    
+    rsi_val = an.get('rsi')
+    rsi_txt = f"{rsi_val:.1f}" if rsi_val is not None else "-"
+    c3.markdown(draw_card("RSI", rsi_txt, 0, ""), unsafe_allow_html=True)
+    
+    vol_txt = f"{int(data['volume']):,}"
+    c4.markdown(draw_card("거래량", vol_txt, 0, ""), unsafe_allow_html=True)
 
-        # 최근 5거래일 추이 테이블 (복구)
-        if len(data['dates']) >= 6:
-            st.write("#### 🕒 최근 5거래일 추이")
-            rows = []
-            for i in range(-1, -6, -1):
-                p, po = data['close_prices'][i], data['close_prices'][i-1]
-                df_val, dc = p-po, ((p-po)/po)*100
-                clr = "red" if df_val > 0 else ("blue" if df_val < 0 else "black")
-                p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
-                df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
-                rows.append([data['dates'][i], p_f, f"<span style='color:{clr}'>{df_f}</span>", f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
-            st.write(pd.DataFrame(rows, columns=["날짜", "종가", "변동", "등락률", "거래량"]).to_html(escape=False, index=False), unsafe_allow_html=True)
+    if len(data['dates']) >= 6:
+        st.write("#### 🕒 최근 5거래일 추이 (매매 시그널 분석)")
+        df_pr = pd.DataFrame({'Close': data['close_prices']})
+        
+        ema12 = df_pr['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = df_pr['Close'].ewm(span=26, adjust=False).mean()
+        df_pr['MACD'] = ema12 - ema26
+        
+        delta_pr = df_pr['Close'].diff()
+        gain = delta_pr.where(delta_pr > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta_pr.where(delta_pr < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        rs = gain / loss
+        df_pr['RSI'] = 100 - (100 / (1 + rs))
+        
+        rsi_list = df_pr['RSI'].tolist()
+        macd_list = df_pr['MACD'].tolist()
 
-        # 상세 분석 코멘트
-        st.write("#### 💡 기술적 지표 분석")
-        for detail in an.get('details', []):
-            st.success(detail)
+        table_html = "<table class='custom-table'><tr><th>날짜</th><th>종가</th><th>변동</th><th>등락률</th><th>거래량</th><th>RSI</th><th>MACD</th></tr>"
+        
+        for i in range(-2, -7, -1):
+            p, po = data['close_prices'][i], data['close_prices'][i-1]
+            v_curr, v_prev = data['volumes'][i], data['volumes'][i-1]
+            
+            df_val, dc = p-po, ((p-po)/po)*100
+            clr = "#f44336" if df_val > 0 else ("#2196f3" if df_val < 0 else "#616161")
+            
+            p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
+            df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
+            
+            vol_str = f"{int(v_curr):,}"
+            if df_val > 0 and v_curr > v_prev:
+                vol_str = f"<span style='color:#f44336; font-weight:bold;'>{vol_str} 🟢</span>"
+            elif df_val < 0 and v_curr > v_prev:
+                vol_str = f"<span style='color:#2196f3; font-weight:bold;'>{vol_str} 🔴</span>"
+            else:
+                vol_str = f"<span>{vol_str}</span>"
+            
+            d_rsi = rsi_list[i]
+            if pd.notna(d_rsi):
+                if d_rsi <= 30: rsi_str = f"<span style='color:#2196f3; font-weight:bold;'>{d_rsi:.1f} 🟢</span>"
+                elif d_rsi >= 70: rsi_str = f"<span style='color:#f44336; font-weight:bold;'>{d_rsi:.1f} 🔴</span>"
+                else: rsi_str = f"<span style='color:#424242;'>{d_rsi:.1f}</span>"
+            else: rsi_str = "-"
+                
+            d_macd = macd_list[i]
+            if pd.notna(d_macd):
+                if d_macd > 0: macd_str = f"<span style='color:#f44336; font-weight:bold;'>{d_macd:.2f} 🟢</span>"
+                else: macd_str = f"<span style='color:#2196f3; font-weight:bold;'>{d_macd:.2f} 🔴</span>"
+            else: macd_str = "-"
+            
+            table_html += f"<tr><td>{data['dates'][i][5:]}</td><td><b>{p_f}</b></td><td style='color:{clr}; font-weight:bold;'>{df_f}</td><td style='color:{clr}; font-weight:bold;'>{dc:+.2f}%</td><td>{vol_str}</td><td>{rsi_str}</td><td>{macd_str}</td></tr>"
+        table_html += "</table>"
+        st.markdown(table_html, unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="guide-box">
+            <b>💡 기술적 지표 매매 시그널 가이드</b><br>
+            위 표의 🟢 기호는 매수를 고려해 볼 만한 <b>긍정적(Bullish) 신호</b>를 의미합니다.<br><br>
+            • <b>거래량:</b> 주가가 상승하면서 전일 대비 거래량이 증가하면 강한 매수세(🟢)로 해석합니다.<br>
+            • <b>RSI:</b> 30 이하로 떨어지면 주가가 과하게 빠진 '과매도' 상태로 반등 가능성(🟢)이 높습니다. (70 이상은 단기고점 🔴)<br>
+            • <b>MACD:</b> 0선 위(양수)에 머물고 있으면 전반적인 상승 추세(🟢)가 유지되고 있음을 의미합니다.<br><br>
+            ※ 세 가지 지표에 모두 🟢 신호가 켜졌다면 단기적으로 매우 좋은 매수 타이밍일 확률이 높습니다!
+        </div>
+        """, unsafe_allow_html=True)
 
-        # 뉴스 및 외부 링크
-        col_n, col_l = st.columns(2)
-        with col_n:
-            st.write("#### 📰 관련 최신 뉴스")
-            for n in news: st.markdown(f"- [{n['title']}]({n['link']})")
-        with col_l:
-            st.write("#### 🔗 외부 분석 도구")
-            judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
-            st.info(f"[주달(Judal) 테마/재료 확인하기]({judal_url})")
+    st.divider()
+    st.subheader("💡 종합 분석 의견")
+    st.markdown(f"### {an.get('recommendation_color', '')} {an.get('recommendation', '')}")
+    for d in an.get('details', []): st.success(d)
+    
+    st.divider()
+    
+    if item['code'].isdigit() and len(item['code']) == 6:
+        judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
+        st.info(f"💡 [주달(Judal) 테마 확인]({judal_url})")
+        
+    for n in news: st.markdown(f"🔗 [{n['title']}]({n['link']})")
 
-        # 관심종목 추가 버튼 (동기화 포함)
-        is_fav = any(s['code'] == item['code'] for s in st.session_state.custom_stocks)
-        if not is_fav:
-            if st.button("➕ 이 종목을 내 관심종목에 저장", key=f"add_{item['code']}_{key_suffix}", use_container_width=True, type="primary"):
-                st.session_state.custom_stocks.append(item)
-                save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
-                st.toast("✅ 구글 시트에 저장되었습니다!")
-                time.sleep(1)
-                st.rerun()
+    if not any(s["code"] == item['code'] for s in st.session_state.get("custom_stocks", [])):
+        st.write("")
+        if st.button("➕ 이 종목을 '관심종목'에 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True, type="primary"):
+            if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
+            st.session_state.custom_stocks.append(item)
+            
+            # 💡 [연동 포인트 1] 추가 시 구글 시트에 즉시 업로드
+            sheet = get_db_sheet()
+            if sheet: sync_save_favs(sheet, st.session_state.custom_stocks)
+            
+            st.rerun()
 
-# --- [5. 로그인 및 메인 로직] ---
-if "login_info" not in st.session_state:
+# --- 메인 실행 로직 ---
+if "pw_ok" not in st.session_state: st.session_state.pw_ok = False
+if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
+if "search_history" not in st.session_state: st.session_state.search_history = []
+if "active_item" not in st.session_state: st.session_state.active_item = None
+if "port_code" not in st.session_state: st.session_state.port_code = None
+
+if not st.session_state.pw_ok:
     st.title("🚀 Stock Screener Pro")
+    st.write("---")
     _, col, _ = st.columns([1, 1, 1])
     with col:
-        st.subheader("🔒 개인 공간 로그인")
-        nick = st.text_input("닉네임 (ID)")
-        pin = st.text_input("보안 PIN (4자리)", type="password")
-        if st.button("로그인 및 동기화", use_container_width=True, type="primary"):
-            sheet = get_db_sheet()
-            if sheet:
-                res = load_user_favs(sheet, nick, pin)
-                if res == "AUTH_FAIL": st.error("PIN 번호가 틀립니다.")
-                else:
-                    st.session_state.login_info = {"nick": nick, "pin": pin}
-                    st.session_state.custom_stocks = json.loads(res) if res not in ["NEW_USER", "[]"] else []
-                    st.rerun()
+        st.subheader("🔒 로그인")
+        pw = st.text_input("접속 비밀번호를 입력하세요", type="password")
+        if st.button("들어가기", use_container_width=True, type="primary"):
+            if hashlib.sha256(pw.encode()).hexdigest() == CORRECT_PASSWORD_HASH:
+                st.session_state.pw_ok = True
+                
+                # 💡 [연동 포인트 2] 로그인 성공 시 구글 시트에서 기존 관심종목 불러오기
+                sheet = get_db_sheet()
+                if sheet: 
+                    st.session_state.custom_stocks = sync_load_favs(sheet)
+                    
+                st.rerun()
+            else: st.error("비밀번호가 틀렸습니다.")
 else:
-    user = st.session_state.login_info
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
-    sheet = get_db_sheet()
+    
+    if datetime.now().day == 13:
+        st.info("📅 오늘은 매월 13일, 종목 리스트 업데이트 권장일입니다.")
 
-    st.sidebar.write(f"👤 **{user['nick']}** 님")
-    if st.sidebar.button("로그아웃"):
-        del st.session_state.login_info
-        st.rerun()
-
-    tab1, tab2, tab3 = st.tabs(["🔍 종목 검색", "⭐ 내 관심종목", "⚙️ 설정"])
+    tab1, tab2, tab3 = st.tabs(["🔍 종목 분석", "⭐ 관심종목", "⚙️ 관리"])
 
     with tab1:
-        query = st.text_input("종목명 또는 티커 입력")
-        if query:
-            cands = search_candidates(query)
-            if not cands.empty:
-                pick = st.selectbox("종목 선택", [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()])
-                if st.button("실시간 분석 실행", type="primary"):
-                    code = pick.split("(")[1].replace(")", "")
-                    name = pick.split(" (")[0]
-                    render_full_report({"code": code, "name": name}, fetcher, analyzer, exc_rate, sheet, user, "search")
+        st.markdown("### 🕒 최근 검색")
+        if st.session_state.search_history:
+            cols = st.columns(5)
+            for i, h in enumerate(st.session_state.search_history):
+                if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
+                    st.session_state.active_item = h
+                    st.rerun()
+        
+        st.divider()
+        
+        _, search_col, _ = st.columns([1, 2, 1])
+        with search_col:
+            query = st.text_input("종목명 입력 (한국주식, 또는 애플/테슬라/엔비디아 등)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
+            if query:
+                cands = search_candidates(query)
+                if cands.empty:
+                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다.")
+                else:
+                    options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
+                    pick = st.selectbox("정확한 종목을 선택하세요", options)
+                    if st.button("📊 즉시 분석", type="primary", use_container_width=True):
+                        code = pick.split("(")[1].replace(")", "")
+                        name = pick.split(" (")[0]
+                        item = {"code": code, "name": name, "sector": "기타"}
+                        st.session_state.active_item = item
+                        st.session_state.search_history = [i for i in st.session_state.search_history if i['code'] != code]
+                        st.session_state.search_history.insert(0, item)
+                        st.session_state.search_history = st.session_state.search_history[:10]
+                        st.rerun()
+
+        if st.session_state.active_item:
+            st.divider()
+            render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, "tab1")
 
     with tab2:
-        if not st.session_state.custom_stocks:
-            st.info("저장된 종목이 없습니다.")
+        st.markdown("### ⭐ 내 관심종목 리스트")
+        if not st.session_state.custom_stocks: st.info("관심종목을 추가해 보세요.")
         else:
-            for i, s in enumerate(st.session_state.custom_stocks):
-                c1, c2, c3 = st.columns([6, 2, 2])
-                c1.markdown(f"**{s['name']}** ({s['code']})")
-                if c2.button("📈 분석", key=f"f_an_{i}"):
-                    render_full_report(s, fetcher, analyzer, exc_rate, sheet, user, f"fav_{i}")
-                if c3.button("🗑️ 삭제", key=f"f_del_{i}"):
-                    st.session_state.custom_stocks.pop(i)
-                    save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
+            col1, col2 = st.columns([8, 2])
+            with col2:
+                if st.button("🗑️ 전체 삭제", use_container_width=True): 
+                    st.session_state.custom_stocks = []
+                    
+                    # 💡 [연동 포인트 3] 전체 삭제 내용 구글 시트에 즉시 반영
+                    sheet = get_db_sheet()
+                    if sheet: sync_save_favs(sheet, st.session_state.custom_stocks)
+                    
                     st.rerun()
+            
+            for i, s in enumerate(st.session_state.custom_stocks):
+                c1, c2, c3 = st.columns([5, 3, 2])
+                c1.write(f"**{s['name']}** ({s['code']})")
+                lbl = "🔼 닫기" if st.session_state.port_code == s['code'] else "📊 분석"
+                if c2.button(lbl, key=f"p_an_{i}", use_container_width=True):
+                    st.session_state.port_code = None if st.session_state.port_code == s['code'] else s['code']
+                    st.rerun()
+                if c3.button("❌", key=f"p_del_{i}", use_container_width=True):
+                    st.session_state.custom_stocks.pop(i)
+                    
+                    # 💡 [연동 포인트 4] 개별 삭제 내용 구글 시트에 즉시 반영
+                    sheet = get_db_sheet()
+                    if sheet: sync_save_favs(sheet, st.session_state.custom_stocks)
+                    
+                    st.rerun()
+                
+                if st.session_state.port_code == s['code']:
+                    render_report(fetcher, analyzer, exc_rate, s, f"tab2_{i}")
+                    st.divider()
 
     with tab3:
-        st.write(f"접속 중인 계정: {user['nick']}")
-        if st.button("🔄 구글 시트 데이터 강제 새로고침"):
-            res = load_user_favs(sheet, user['nick'], user['pin'])
-            st.session_state.custom_stocks = json.loads(res) if res not in ["NEW_USER", "[]"] else []
+        # 🌟 관리자 탭 정리: 파일 업로드 기능 제거 & 다운로드 버튼 유지
+        st.subheader("📥 데이터베이스 관리")
+        st.info("""
+        **💡 관리자 전용 DB 갱신 안내**
+        종목 데이터베이스 갱신은 보안을 위해 앱 외부(GitHub 또는 스트림릿 클라우드 파일 관리자)에서 직접 `krx_stock_list.csv` 파일을 덮어씌우는 방식으로 진행됩니다.
+        """)
+        
+        st.write("---")
+        db_df = get_stock_db()
+        csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📊 현재 앱에 적용된 종목 리스트 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list_active.csv", mime="text/csv")
+        
+        st.write("---")
+        if st.button("🚪 로그아웃", type="primary"):
+            st.session_state.pw_ok = False
             st.rerun()
