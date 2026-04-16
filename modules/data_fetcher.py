@@ -4,6 +4,9 @@ import yfinance as yf
 import FinanceDataReader as fdr
 import re
 import os
+import urllib.parse
+import requests
+import xml.etree.ElementTree as ET
 from io import StringIO
 
 EMBEDDED_MINI_CSV = """
@@ -20,40 +23,34 @@ BTQ,BTQ,미국 주식
 
 @st.cache_data(ttl=60 * 60 * 24)
 def get_stock_db():
-    # 1. 시도: FinanceDataReader (Streamlit 클라우드에서 KRX 차단될 수 있음)
     try:
         df = fdr.StockListing('KRX')
         if not df.empty and 'Code' in df.columns and 'Name' in df.columns:
             df = df.rename(columns={'Code': '종목코드', 'Name': '회사명', 'Sector': '섹터'})
-            if '섹터' not in df.columns:
-                df['섹터'] = '기타'
+            if '섹터' not in df.columns: df['섹터'] = '기타'
             df['섹터'] = df['섹터'].fillna('기타')
             df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
             return df[['종목코드', '회사명', '섹터']].dropna().reset_index(drop=True)
-    except Exception as e:
-        pass
+    except Exception: pass
 
-    # 2. 시도: 클라우드 차단 시 깃허브에 있는 krx_stock_list.csv 자동 사용
     try:
         if os.path.exists("krx_stock_list.csv"):
             df = pd.read_csv("krx_stock_list.csv")
             col_map = {}
             lower_cols = {c.lower(): c for c in df.columns}
-            for cand in ["회사명", "name", "corp_name", "company", "companyname"]:
+            for cand in ["회사명", "name", "corp_name", "company"]:
                 if cand.lower() in lower_cols: col_map[lower_cols[cand.lower()]] = "회사명"; break
             for cand in ["종목코드", "code", "symbol", "ticker"]:
                 if cand.lower() in lower_cols: col_map[lower_cols[cand.lower()]] = "종목코드"; break
-            for cand in ["섹터", "sector", "업종", "industry"]:
+            for cand in ["섹터", "sector", "업종"]:
                 if cand.lower() in lower_cols: col_map[lower_cols[cand.lower()]] = "섹터"; break
             
             df = df.rename(columns=col_map)
             if '섹터' not in df.columns: df['섹터'] = '기타'
             df['종목코드'] = df['종목코드'].astype(str).str.extract(r"(\d+)")[0].fillna(df["종목코드"].astype(str)).str.zfill(6)
             return df[['종목코드', '회사명', '섹터']].dropna().reset_index(drop=True)
-    except Exception as e:
-        pass
+    except Exception: pass
 
-    # 3. 최후의 보루: 내장 미니 데이터
     df = pd.read_csv(StringIO(EMBEDDED_MINI_CSV))
     df['종목코드'] = df['종목코드'].astype(str)
     return df
@@ -63,7 +60,6 @@ def search_candidates(query, limit=20):
     q = (query or "").strip().upper()
     if not q: return df.head(0)
 
-    # 영문(미국 티커) 입력 시 검색 결과에 바로 띄워줌
     if re.match(r'^[A-Z]+$', q):
         us_row = pd.DataFrame([{'회사명': q, '종목코드': q, '섹터': '미국 주식'}])
         name_norm = df["회사명"].astype(str).str.replace(" ", "", regex=False).str.upper()
@@ -83,20 +79,17 @@ class DataFetcher:
     @st.cache_data(ttl=600)
     def get_stock_data_live(_self, code):
         try:
-            # 종목코드가 숫자 6자리인 경우 한국 주식 (yfinance 포맷 변환)
             if code.isdigit() and len(code) == 6:
-                stock = yf.Ticker(code + ".KS") # 코스피 먼저 시도
+                stock = yf.Ticker(code + ".KS")
                 df = stock.history(period="3mo")
                 if df.empty:
-                    stock = yf.Ticker(code + ".KQ") # 없으면 코스닥 시도
+                    stock = yf.Ticker(code + ".KQ")
                     df = stock.history(period="3mo")
             else:
-                # 그 외 영문 코드는 미국 주식으로 인식 (예: IREN, BTQ)
                 stock = yf.Ticker(code)
                 df = stock.history(period="3mo")
 
-            if df is None or df.empty or len(df) < 35:
-                return None
+            if df is None or df.empty or len(df) < 35: return None
 
             return {
                 "current": float(df.iloc[-1]["Close"]),
@@ -106,11 +99,29 @@ class DataFetcher:
                 "close_prices": df["Close"].astype(float).tolist(),
                 "volumes": df["Volume"].astype(float).tolist(),
             }
-        except Exception: 
-            return None
+        except Exception: return None
 
     def get_stock_data(self, code):
         offline_map = st.session_state.get("offline_price_data", {})
-        if isinstance(offline_map, dict) and code in offline_map:
-            return offline_map[code]
+        if isinstance(offline_map, dict) and code in offline_map: return offline_map[code]
         return self.get_stock_data_live(code)
+
+    # 🌟 새롭게 추가된 기능: 기업 관련 최신 뉴스 긁어오기
+    @st.cache_data(ttl=3600)
+    def get_company_news(_self, company_name, limit=5):
+        try:
+            search_query = urllib.parse.quote(f"{company_name} 주식")
+            url = f"https://news.google.com/rss/search?q={search_query}&hl=ko&gl=KR&ceid=KR:ko"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            response = requests.get(url, headers=headers, timeout=5)
+            root = ET.fromstring(response.text)
+            
+            news_list = []
+            for item in root.findall('.//item')[:limit]:
+                title = item.find('title').text
+                link = item.find('link').text
+                news_list.append({"title": title, "link": link})
+            return news_list
+        except Exception as e:
+            print(f"[ERROR] 뉴스 가져오기 실패: {e}")
+            return []
