@@ -83,10 +83,8 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             p, po = data['close_prices'][i], data['close_prices'][i-1]
             df_val, dc = p-po, ((p-po)/po)*100
             clr = "red" if df_val > 0 else ("blue" if df_val < 0 else "black")
-            
             p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
             df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
-            
             rows.append([data['dates'][i][5:], p_f, 
                          f"<span style='color:{clr}'>{df_f}</span>",
                          f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
@@ -145,9 +143,8 @@ else:
         query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 후보가 나타납니다.")
         if query:
             cands = search_candidates(query)
-            
             if cands.empty:
-                st.warning(f"'{query}'에 대한 검색 결과가 없습니다. 거래소 서버 지연일 수 있으니 ⚙️관리 탭에서 CSV를 업로드하시거나 잠시 후 다시 시도해주세요.")
+                st.warning(f"'{query}'에 대한 검색 결과가 없습니다. 거래소 서버 지연일 수 있으니 ⚙️관리 탭에서 전체종목 CSV를 업로드 해주세요.")
             else:
                 options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
                 pick = st.selectbox("정확한 종목 선택", options)
@@ -182,10 +179,32 @@ else:
 
     with tab3:
         st.subheader("📥 데이터베이스 관리")
-        st.write("서버 오류를 대비하여, 다운로드한 CSV 파일을 프로젝트 폴더에 `krx_stock_list.csv` 이름으로 저장해두면 오프라인 상태에서도 종목 검색이 가능합니다.")
+        st.write("스트림릿 클라우드 환경에서는 한국거래소(KRX) 연결이 차단될 수 있습니다. 종목 검색이 원활하지 않다면 직접 CSV 파일을 업로드해주세요.")
+        
+        # 🌟 수동 업로드 위젯 추가
+        uploaded_file = st.file_uploader("전체 종목 리스트 CSV 업로드", type=['csv'])
+        if uploaded_file is not None:
+            try:
+                df = pd.read_csv(uploaded_file)
+                # 컬럼 매핑 보정
+                col_map = {}
+                for c in df.columns:
+                    if "코드" in c or "code" in c.lower(): col_map[c] = "종목코드"
+                    elif "명" in c or "name" in c.lower(): col_map[c] = "회사명"
+                    elif "섹터" in c or "업종" in c: col_map[c] = "섹터"
+                df = df.rename(columns=col_map)
+                df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
+                if '섹터' not in df.columns: df['섹터'] = '기타'
+                
+                st.session_state.uploaded_db = df[['종목코드', '회사명', '섹터']].dropna()
+                st.success(f"✅ {len(st.session_state.uploaded_db)}개의 종목 데이터가 성공적으로 업로드되어 시스템에 반영되었습니다! (검색 탭을 다시 확인해 보세요)")
+            except Exception as e:
+                st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
+
+        st.write("---")
         db_df = get_stock_db()
         csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📊 현재 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"krx_stock_list.csv", mime="text/csv")
+        st.download_button("📊 현재 적용 중인 종목 리스트(CSV) 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list.csv", mime="text/csv")
         st.write("---")
         if st.button("🚪 로그아웃"):
             st.session_state.pw_ok = False; st.rerun()
