@@ -6,6 +6,9 @@ import yfinance as yf
 import urllib.parse
 import requests
 import xml.etree.ElementTree as ET
+import re
+from datetime import datetime
+import email.utils
 
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
@@ -20,11 +23,9 @@ def get_exchange_rate():
     except Exception:
         return 1400.0
 
-# 🌟 수정된 뉴스 가져오기 함수 (최근 7일 조건 추가)
 @st.cache_data(ttl=3600)
 def get_company_news(company_name, limit=5):
     try:
-        # 검색어 뒤에 ' when:7d'를 붙여 일주일 이내 기사만 필터링합니다.
         search_query = urllib.parse.quote(f"{company_name} 주식 when:7d")
         url = f"https://news.google.com/rss/search?q={search_query}&hl=ko&gl=KR&ceid=KR:ko"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -35,7 +36,30 @@ def get_company_news(company_name, limit=5):
         for item in root.findall('.//item')[:limit]:
             title = item.find('title').text
             link = item.find('link').text
-            news_list.append({"title": title, "link": link})
+            
+            # 발행 날짜 깔끔하게 변환
+            pub_date_str = ""
+            pub_date_element = item.find('pubDate')
+            if pub_date_element is not None and pub_date_element.text:
+                try:
+                    parsed_date = email.utils.parsedate_tz(pub_date_element.text)
+                    dt = datetime.fromtimestamp(email.utils.mktime_tz(parsed_date))
+                    pub_date_str = dt.strftime("%Y년 %m월 %d일 %H:%M")
+                except:
+                    pub_date_str = pub_date_element.text
+
+            # 언론사 정보 추출
+            source_str = "알 수 없음"
+            source_element = item.find('source')
+            if source_element is not None and source_element.text:
+                source_str = source_element.text
+
+            news_list.append({
+                "title": title,
+                "link": link,
+                "pub_date": pub_date_str,
+                "source": source_str
+            })
         return news_list
     except Exception as e:
         print(f"[ERROR] 뉴스 가져오기 실패: {e}")
@@ -208,7 +232,7 @@ if check_password():
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
                 if st.button("📊 상세 분석 시작", type="primary"):
-                    with st.spinner(f"{name} 데이터를 분석하고 최근 7일 뉴스를 가져오는 중..."):
+                    with st.spinner(f"{name} 데이터를 분석하고 최근 뉴스를 가져오는 중..."):
                         data = fetcher.get_stock_data(code)
                         news_list = get_company_news(name)
                         
@@ -234,10 +258,14 @@ if check_password():
                                 
                                 st.divider()
 
+                                # 🌟 새롭게 디자인된 뉴스 UI 부분
                                 st.subheader(f"📰 '{name}' 최근 1주일 주요 뉴스")
                                 if news_list:
                                     for news in news_list:
-                                        st.markdown(f"🔗 [{news['title']}]({news['link']})")
+                                        # st.expander를 이용해 클릭하면 열리는 아코디언 메뉴 생성
+                                        with st.expander(f"🗞️ {news['title']} ({news['source']})"):
+                                            st.write(f"🕒 **발행 시간:** {news['pub_date']}")
+                                            st.markdown(f"🔗 **[여기를 클릭하여 전체 기사 내용 읽기]({news['link']})**")
                                 else:
                                     st.write("최근 일주일 이내에 등록된 주요 뉴스가 없습니다.")
                         else:
