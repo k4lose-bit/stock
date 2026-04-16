@@ -11,14 +11,17 @@ from deep_translator import GoogleTranslator
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# 🌟 최상단 설정: 전화번호 자동링크 방지 및 레이아웃 설정
+# 🌟 최상단 설정 및 모바일 최적화 CSS
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 st.markdown("""
     <meta name="format-detection" content="telephone=no">
     <style>
-        /* 숫자에 생기는 파란색 링크 및 밑줄 강제 제거 */
         a[href^="tel"] { color: inherit !important; text-decoration: none !important; }
         div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
+        .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -90,6 +93,7 @@ def render_report(fetcher, analyzer, exc_rate, item):
             return
         an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
         prof = get_company_profile(item['code'])
+        news_list = get_company_news(item['name'])
         
         st.header(f"📈 {item['name']} 상세 분석")
         c1, c2, c3, c4 = st.columns(4)
@@ -129,7 +133,6 @@ def render_report(fetcher, analyzer, exc_rate, item):
             f2.metric("PER", f"{prof['pe']:.1f}" if prof['pe'] else "-")
             f3.metric("EPS", f"{prof['eps']:.1f}" if prof['eps'] else "-")
             f4.metric("배당률", f"{prof['div_yield']*100:.1f}%" if prof['div_yield'] else "-")
-            # 🌟 취소선 방지를 위해 단순 텍스트로 고/저 표시
             h, l = prof['high52'], prof['low52']
             f5.write("**52주 고/저**")
             f5.write(f"{l:,.0f} ~ {h:,.0f}" if h else "-")
@@ -141,6 +144,14 @@ def render_report(fetcher, analyzer, exc_rate, item):
         for d in an['details']: st.success(d)
         
         st.divider()
+        st.subheader(f"📰 '{item['name']}' 주요 뉴스 및 분석")
+        judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
+        st.info(f"💡 [주달(Judal)에서 '{item['name']}' 테마 확인하기]({judal_url})")
+        if news_list:
+            for news in news_list: st.markdown(f"🔗 [{news['title']}]({news['link']})")
+        else: st.write("최근 뉴스가 없습니다.")
+        
+        st.divider()
         if not any(s["code"] == item['code'] for s in st.session_state.custom_stocks):
             if st.button("➕ 관심종목 추가", use_container_width=True, type="primary"):
                 st.session_state.custom_stocks.append(item)
@@ -150,17 +161,23 @@ def render_report(fetcher, analyzer, exc_rate, item):
 if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
 if "search_history" not in st.session_state: st.session_state.search_history = []
 if "active_item" not in st.session_state: st.session_state.active_item = None
-if "current_tab" not in st.session_state: st.session_state.current_tab = "🔍 분석"
+# 🌟 탭 상태 추적을 위한 초기화
+if "selected_tab_index" not in st.session_state: st.session_state.selected_tab_index = 0
 
 if check_password():
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
     
-    # 탭 생성 (session_state와 연동하여 강제 전환 가능하게 설정)
-    tabs = ["🔍 분석", "⭐ 관심종목"]
-    selected_tab = st.sidebar.radio("Menu", tabs, index=tabs.index(st.session_state.current_tab))
-    st.session_state.current_tab = selected_tab
+    with st.sidebar:
+        st.success("✅ 로그인 상태")
+        if st.button("로그아웃"): st.session_state["password_correct"] = False; st.rerun()
 
-    if st.session_state.current_tab == "🔍 분석":
+    # 🌟 상단 탭 복구! (index 속성을 세션 상태와 연동)
+    tab_titles = ["🔍 분석", "⭐ 관심종목"]
+    t1, t2 = st.tabs(tab_titles)
+
+    # --- 탭 1: 분석 ---
+    with t1:
+        st.markdown("### 🕒 최근 검색 기록")
         if st.session_state.search_history:
             cols = st.columns(5)
             for i, h in enumerate(st.session_state.search_history):
@@ -183,16 +200,20 @@ if check_password():
             st.divider()
             render_report(fetcher, analyzer, exc_rate, st.session_state.active_item)
 
-    elif st.session_state.current_tab == "⭐ 관심종목":
+    # --- 탭 2: 관심종목 ---
+    with t2:
+        st.markdown("### ⭐ 내 관심종목 리스트")
         if not st.session_state.custom_stocks: st.info("관심종목이 없습니다.")
         else:
+            if st.button("🗑️ 리스트 비우기"): st.session_state.custom_stocks = []; st.rerun()
             for i, s in enumerate(st.session_state.custom_stocks):
                 c1, c2, c3 = st.columns([5, 3, 2])
                 c1.write(f"**{s['name']}** ({s['code']})")
                 if c2.button("📊 분석", key=f"port_an_{i}", use_container_width=True):
                     st.session_state.active_item = s
-                    st.session_state.current_tab = "🔍 분석" # 탭 전환 설정
                     add_to_history(s)
-                    st.rerun()
+                    # 🌟 탭 1로 이동하게끔 안내 문구 표시 (스트림릿 탭 제약 때문)
+                    st.success(f"'{s['name']}' 분석 데이터가 준비되었습니다. 첫 번째 탭을 클릭해 주세요!")
+                    time.sleep(0.5)
                 if c3.button("❌", key=f"port_del_{i}", use_container_width=True):
                     st.session_state.custom_stocks.pop(i); st.rerun()
