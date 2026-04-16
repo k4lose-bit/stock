@@ -66,7 +66,7 @@ def draw_card(title, value_str, diff_val, diff_str, caption=""):
 def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     data = fetcher.get_stock_data(item['code'])
     if not data:
-        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드(티커)나 네트워크를 확인해주세요.")
+        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드나 네트워크를 확인해주세요.")
         return
 
     an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
@@ -171,7 +171,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     
     st.divider()
     
-    # 🌟 핵심 수정: 종목 코드가 6자리 숫자(한국 주식)일 때만 주달 링크 표시!
     if item['code'].isdigit() and len(item['code']) == 6:
         judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
         st.info(f"💡 [주달(Judal) 테마 확인]({judal_url})")
@@ -222,8 +221,8 @@ else:
         
         _, search_col, _ = st.columns([1, 2, 1])
         with search_col:
-            # 🌟 플레이스홀더(안내 문구)에 해외 주식은 티커를 넣어야 한다는 점을 명확히 명시!
-            query = st.text_input("종목명 입력 (한국주식은 이름, 해외주식은 영문 티커 AAPL, NOK 등)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
+            # 🌟 검색어 안내 문구를 친절하게 변경했습니다.
+            query = st.text_input("종목명 입력 (한국주식, 또는 애플/테슬라/엔비디아 등)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
             if query:
                 cands = search_candidates(query)
                 if cands.empty:
