@@ -111,9 +111,9 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
         if not an: return
 
         st.header(f"📈 {name} 상세 분석 리포트")
-        c1, c2, c3, c4 = st.columns(4)
         
-        # 🌟 현재가 및 전일 대비 차액 계산
+        # 🌟 상단 핵심 메트릭 (겹침 방지를 위해 간격 조정)
+        c1, c2, c3, c4 = st.columns(4)
         curr = an['current']
         prev_close = data.get("prev_close", curr)
         day_diff = curr - prev_close
@@ -127,59 +127,59 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
             day_diff_str = f"${day_diff:+.2f}"
             sub_price = f"약 {int(curr * exc_rate):,}원"
             
-        diff_color = "red" if day_diff > 0 else ("blue" if day_diff < 0 else "gray")
-        
-        # 현재가 메트릭 표시 (전일대비 차액 포함)
         c1.metric("현재가", krw_price, day_diff_str)
-        st.markdown(f"<div style='margin-top:-25px; margin-left:10px; font-size:0.9rem; color:gray;'>{sub_price}</div>", unsafe_allow_html=True)
+        # 환율 변환가는 겹침 방지를 위해 메트릭 안에 넣지 않고 캡션으로 처리
+        c1.caption(sub_price)
         
         c2.metric("당일 등락률", f"{an['change']:.2f}%")
         c3.metric("RSI", f"{an['rsi']:.1f}")
         c4.metric("거래량", f"{int(an['volume']):,}")
+        
+        st.write("") # 약간의 세로 여백 추가
         
         dates = data.get("dates", [])
         prices = data.get("close_prices", [])
         volumes = data.get("volumes", [])
         
         if len(dates) >= 20: 
-            for c in [c1, c2, c3, c4]: c.markdown("<hr style='margin: 5px 0;'>", unsafe_allow_html=True)
+            # 🌟 겹침과 삭제선 오류의 주범이었던 hr과 복잡한 div 구조를 단순화된 테이블 형태로 변경
+            st.markdown("#### 🕒 최근 5거래일 추이 (전일 대비)")
             
-            # 🌟 최근 5거래일 추이 (전일 대비 차액 표시)
+            history_data = []
             for i in range(-2, -7, -1):
                 if abs(i-1) > len(dates): break
                 d_short = dates[i][5:]
-                p_past = prices[i] # 해당일 종가
-                p_before = prices[i-1] # 해당일의 전일 종가
-                diff_prev = p_past - p_before # 전일 대비 차액
-                
-                if curr > 1000:
-                    p_str = f"{int(p_past):,}원"
-                    d_prev_str = f"({int(diff_prev):+,}원)"
-                else:
-                    p_str = f"${p_past:.2f}"
-                    d_prev_str = f"({diff_prev:+.2f})"
-                
-                prev_color = "#e53935" if diff_prev > 0 else ("#1e88e5" if diff_prev < 0 else "#666")
-                c1.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | {p_str} <span style='color:{prev_color}; font-weight:bold;'>{d_prev_str}</span></div>", unsafe_allow_html=True)
-                
-                # 일별 등락률
+                p_past = prices[i]
+                p_before = prices[i-1]
+                diff_prev = p_past - p_before
                 chg = ((p_past - p_before) / p_before) * 100
-                chg_color = "#e53935" if chg > 0 else ("#1e88e5" if chg < 0 else "#666")
-                c2.markdown(f"<div style='font-size:0.8rem; color:{chg_color};'>{d_short} | <b>{chg:+.2f}%</b></div>", unsafe_allow_html=True)
                 
-                # 일별 RSI
+                # 금액 포맷팅
+                p_past_fmt = f"{int(p_past):,}원" if curr > 1000 else f"${p_past:.2f}"
+                diff_fmt = f"{int(diff_prev):+,}원" if curr > 1000 else f"${diff_prev:+.2f}"
+                
+                # RSI 계산
                 rsi_val = analyzer.indicator.calculate_rsi(prices[:i+1])
-                rsi_display = f"{rsi_val:.1f}" if rsi_val is not None else "-"
-                c3.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{rsi_display}</b></div>", unsafe_allow_html=True)
+                rsi_fmt = f"{rsi_val:.1f}" if rsi_val is not None else "-"
                 
-                # 일별 거래량
-                c4.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{int(volumes[i]):,}</b></div>", unsafe_allow_html=True)
+                history_data.append({
+                    "날짜": d_short,
+                    "종가": p_past_fmt,
+                    "전일대비": diff_fmt,
+                    "등락률": f"{chg:+.2f}%",
+                    "RSI": rsi_fmt,
+                    "거래량": f"{int(volumes[i]):,}"
+                })
+            
+            # 테이블로 깔끔하게 출력 (데이터프레임 사용으로 겹침 완전 차단)
+            st.table(pd.DataFrame(history_data).set_index("날짜"))
 
         st.divider()
         st.subheader("🏢 기업 개요 및 펀더멘탈")
         if profile:
             st.markdown(f"**섹터:** {profile['sector']} | **산업군:** {profile['industry']}")
             if profile['website']: st.markdown(f"**웹사이트:** [{profile['website']}]({profile['website']})")
+            
             f1, f2, f3, f4, f5 = st.columns(5)
             mc = profile.get('marketCap', 0)
             mc_str = (f"{mc // 100000000:,}억 원" if code.isdigit() else f"${mc // 1000000:,}M") if mc else "-"
