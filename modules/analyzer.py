@@ -1,4 +1,3 @@
-<div style="border: 1px solid #d3d3d3; padding: 15px; border-radius: 5px; font-family: monospace; line-height: 1.5; background-color: transparent; white-space: pre; overflow-x: auto;">
 from modules.indicators import TechnicalIndicators
 
 class StockAnalyzer:
@@ -74,4 +73,3 @@ def analyze(self, code, name, sector, data):
     except Exception as e:
         print(f"[ERROR] 분석 실패: {e}")
         return None
-</div>
