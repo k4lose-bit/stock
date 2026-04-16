@@ -47,3 +47,25 @@ class TechnicalIndicators:
         if macd_prev >= sig_prev and macd_current < sig_current:
             return "데드크로스"
         return None
+
+    # 🌟 새롭게 추가된 볼린저 밴드 계산
+    @staticmethod
+    def calculate_bollinger_bands(prices, period=20, std_dev=2):
+        if len(prices) < period:
+            return None, None, None
+        s = pd.Series(prices)
+        sma = s.rolling(window=period).mean()
+        std = s.rolling(window=period).std()
+        upper = sma + (std * std_dev)
+        lower = sma - (std * std_dev)
+        return float(upper.iloc[-1]), float(sma.iloc[-1]), float(lower.iloc[-1])
+
+    # 🌟 새롭게 추가된 이동평균선 계산 (20일선, 60일선)
+    @staticmethod
+    def calculate_moving_averages(prices):
+        if len(prices) < 60:
+            return None, None
+        s = pd.Series(prices)
+        ma20 = s.rolling(window=20).mean()
+        ma60 = s.rolling(window=60).mean()
+        return float(ma20.iloc[-1]), float(ma60.iloc[-1])
