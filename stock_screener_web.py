@@ -2,11 +2,21 @@ import streamlit as st
 import pandas as pd
 import hashlib
 import time
+import yfinance as yf
 
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
 CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
+
+# 🌟 새롭게 추가된 기능: 실시간 원/달러 환율 가져오기
+@st.cache_data(ttl=3600)
+def get_exchange_rate():
+    try:
+        rate = yf.Ticker("USDKRW=X").history(period="1d")
+        return float(rate['Close'].iloc[-1])
+    except Exception:
+        return 1400.0 # 가져오기 실패 시 기본값
 
 def check_password():
     if "password_correct" not in st.session_state:
@@ -36,6 +46,7 @@ if "offline_price_data" not in st.session_state:
 if check_password():
     fetcher = DataFetcher()
     analyzer = StockAnalyzer()
+    exc_rate = get_exchange_rate() # 환율 정보 로드
 
     with st.sidebar:
         st.success("✅ 로그인 성공!")
@@ -67,7 +78,6 @@ if check_password():
                 pick = st.selectbox("✅ 후보 선택", options, key="add_pick")
                 idx = options.index(pick)
                 
-                # BUG FIX: 미국 영문 티커는 0으로 채우지 않도록 예외 처리
                 code = str(cands.iloc[idx]["종목코드"])
                 if code.isdigit():
                     code = code.zfill(6)
@@ -75,13 +85,32 @@ if check_password():
                 name = str(cands.iloc[idx]["회사명"])
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
-                if st.button("➕ 관심종목에 추가", use_container_width=True):
-                    if not any(s[0] == code for s in st.session_state.custom_stocks):
-                        st.session_state.custom_stocks.append((code, name, sector))
-                        st.success("✅ 추가 완료!")
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ 이미 추가된 종목입니다.")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("➕ 관심종목에 추가", use_container_width=True):
+                        if not any(s[0] == code for s in st.session_state.custom_stocks):
+                            st.session_state.custom_stocks.append((code, name, sector))
+                            st.success("✅ 추가 완료!")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ 이미 추가된 종목입니다.")
+                with col2:
+                    if st.button("📌 지금 바로 미리 분석", use_container_width=True):
+                        with st.spinner(f"{name} 수집 중..."):
+                            data = fetcher.get_stock_data(code)
+                        if data:
+                            an = analyzer.analyze(code, name, sector, data)
+                            if an:
+                                st.divider()
+                                m1, m2, m3, m4 = st.columns(4)
+                                
+                                # 환율 적용 로직
+                                krw_price = f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f} (약 {int(an['current'] * exc_rate):,}원)"
+                                m1.metric("현재가", krw_price)
+                                m2.metric("등락율", f"{an['change']:.2f}%")
+                                m3.metric("RSI", f"{an['rsi']:.1f}")
+                                m4.metric("거래량", f"{int(an['volume']):,}")
+                                st.markdown(f"### {an['recommendation_color']} **{an['recommendation']}**")
 
         st.divider()
         db = get_stock_db()
@@ -124,8 +153,9 @@ if check_password():
                                 else: match_signals.append("MACD 골든크로스")
                                 
                             if pass_all and (selected_filters == [] or match_signals):
+                                krw_price = f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f} ({int(an['current'] * exc_rate):,}원)"
                                 results.append({
-                                    "종목명": name, "현재가": int(an["current"]),
+                                    "종목명": name, "현재가": krw_price,
                                     "등락율": f"{an['change']:.2f}%", "RSI": f"{an['rsi']:.1f}",
                                     "신호": " | ".join(match_signals) if match_signals else "-"
                                 })
@@ -148,7 +178,6 @@ if check_password():
                 pick = st.selectbox("✅ 후보 선택", opts, key="single_pick")
                 idx = opts.index(pick)
                 
-                # BUG FIX: 미국 영문 티커는 0으로 채우지 않도록 예외 처리
                 code = str(cands.iloc[idx]["종목코드"])
                 if code.isdigit():
                     code = code.zfill(6)
@@ -166,8 +195,11 @@ if check_password():
                             if an:
                                 st.header(f"📈 {name} 상세 분석 리포트")
                                 c1, c2, c3, c4 = st.columns(4)
-                                # 미국 주식(1000 이하 달러 단위)일 경우 $ 표시로 렌더링
-                                c1.metric("현재가", f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f}")
+                                
+                                # 환율 적용 로직 (상세 분석)
+                                krw_price = f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f} (약 {int(an['current'] * exc_rate):,}원)"
+                                
+                                c1.metric("현재가", krw_price)
                                 c2.metric("등락율", f"{an['change']:.2f}%")
                                 c3.metric("RSI", f"{an['rsi']:.1f}")
                                 c4.metric("거래량", f"{int(an['volume']):,}")
