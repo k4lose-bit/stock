@@ -4,8 +4,19 @@ import yfinance as yf
 import re
 import os
 
+# 🌟 서학개미(해외주식) 전용 스마트 한글-티커 사전
+# 여기에 자주 찾는 해외 주식의 한글 이름과 티커를 적어두면 한글로도 검색이 됩니다!
+US_STOCK_DICT = {
+    "애플": "AAPL", "테슬라": "TSLA", "엔비디아": "NVDA", "마이크로소프트": "MSFT",
+    "구글": "GOOGL", "알파벳": "GOOGL", "아마존": "AMZN", "메타": "META", "페이스북": "META",
+    "넷플릭스": "NFLX", "에이엠디": "AMD", "인텔": "INTC", "티에스엠씨": "TSM",
+    "팔란티어": "PLTR", "아이온큐": "IONQ", "쿠팡": "CPNG", "노키아": "NOK",
+    "아이렌": "IREN", "비티큐": "BTQ", "코인베이스": "COIN", "마이크로스트레티지": "MSTR",
+    "에이에스엠엘": "ASML", "브로드컴": "AVGO", "퀄컴": "QCOM", "일라이릴리": "LLY",
+    "티큐": "TQQQ", "속슬": "SOXL", "슈드": "SCHD", "스파이": "SPY", "큐큐큐": "QQQ"
+}
+
 def get_stock_db():
-    # 🌟 핵심 수정: 웹에서 업로드한 데이터가 있으면 무조건 0순위로 읽어옵니다! (이전 코드에서 누락된 부분)
     if "uploaded_db" in st.session_state and st.session_state.uploaded_db is not None:
         return st.session_state.uploaded_db
         
@@ -21,7 +32,6 @@ def get_stock_db():
             col_map = {}
             for c in df.columns:
                 if c in ['단축코드', '종목코드', '코드', 'CODE']: col_map[c] = '종목코드'
-                # 🌟 '와이제이링크보통주' 대신 '와이제이링크'를 우선적으로 가져오도록 세팅
                 elif c in ['한글종목약명', '종목명', '회사명', 'NAME']: col_map[c] = '회사명'
                 elif c in ['시장구분', '업종명', '섹터', 'SECTOR']: col_map[c] = '섹터'
                 
@@ -43,12 +53,7 @@ def get_stock_db():
     return pd.DataFrame([
         {'회사명': '삼성전자', '종목코드': '005930', '섹터': '반도체'},
         {'회사명': 'SK하이닉스', '종목코드': '000660', '섹터': '반도체'},
-        {'회사명': 'LG', '종목코드': '003550', '섹터': '지주사'},
-        {'회사명': '휴림로봇', '종목코드': '090710', '섹터': '로봇'},
-        {'회사명': 'LK삼양', '종목코드': '225190', '섹터': '기계'},
-        {'회사명': '와이제이링크', '종목코드': '209640', '섹터': '기타'},
-        {'회사명': 'IREN', '종목코드': 'IREN', '섹터': '미국주식'},
-        {'회사명': 'BTQ', '종목코드': 'BTQ', '섹터': '미국주식'}
+        {'회사명': 'LG', '종목코드': '003550', '섹터': '지주사'}
     ])
 
 def search_candidates(query, limit=15):
@@ -62,10 +67,17 @@ def search_candidates(query, limit=15):
     results = df[df["검색용회사명"].str.contains(q_no_space, na=False)].copy()
     results = results.drop(columns=['검색용회사명'])
     
+    # 1. 영문 티커 직접 입력 시 처리
     if re.match(r'^[A-Z]+$', q):
-        us_row = pd.DataFrame([{'회사명': q, '종목코드': q, '섹터': '미국 주식'}])
+        us_row = pd.DataFrame([{'회사명': q, '종목코드': q, '섹터': '해외주식'}])
         results = pd.concat([us_row, results])
         
+    # 2. 🌟 한글로 검색한 내용이 '스마트 사전'에 있으면 자동으로 결과에 추가!
+    for kr_name, ticker in US_STOCK_DICT.items():
+        if q_no_space in kr_name:
+            us_row = pd.DataFrame([{'회사명': kr_name, '종목코드': ticker, '섹터': '해외주식'}])
+            results = pd.concat([us_row, results])
+            
     return results.drop_duplicates(subset=['종목코드']).head(limit)
 
 class DataFetcher:
