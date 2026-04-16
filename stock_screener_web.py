@@ -30,9 +30,16 @@ def get_db_sheet():
 def load_user_favs(sheet, nickname, pin):
     try:
         records = sheet.get_all_records()
+        clean_nick = str(nickname).strip()
+        clean_pin = str(pin).strip()
+        
         for row in records:
-            if str(row.get('Nickname', '')) == nickname:
-                if str(row.get('PIN', '')) == pin:
+            sheet_nick = str(row.get('Nickname', '')).strip()
+            sheet_pin = str(row.get('PIN', '')).strip()
+            
+            if sheet_nick == clean_nick:
+                # 🌟 구글 시트가 '0123'을 '123'으로 바꿨더라도 숫자로 변환해 완벽하게 비교
+                if sheet_pin == clean_pin or (sheet_pin.isdigit() and clean_pin.isdigit() and int(sheet_pin) == int(clean_pin)):
                     return json.loads(row.get('Favorites', "[]"))
                 else: 
                     return "AUTH_FAIL" 
@@ -43,18 +50,21 @@ def save_user_favs(sheet, nickname, pin, fav_list):
     try:
         fav_json = json.dumps(fav_list, ensure_ascii=False)
         records = sheet.get_all_records()
+        clean_nick = str(nickname).strip()
+        # 🌟 구글 시트가 0을 지우지 못하게 강제로 문자열(') 처리
+        safe_pin = f"'{str(pin).strip()}"
         
         if not records:
             sheet.append_row(['Nickname', 'PIN', 'Favorites'])
-            sheet.append_row([nickname, pin, fav_json])
+            sheet.append_row([clean_nick, safe_pin, fav_json])
             return
             
         for idx, row in enumerate(records):
-            if str(row.get('Nickname', '')) == nickname:
+            if str(row.get('Nickname', '')).strip() == clean_nick:
                 sheet.update_cell(idx + 2, 3, fav_json)
                 return
                 
-        sheet.append_row([nickname, pin, fav_json])
+        sheet.append_row([clean_nick, safe_pin, fav_json])
     except: pass
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
@@ -210,8 +220,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
 
     st.divider()
     st.subheader("💡 종합 분석 의견")
-    
-    # 🌟 이 부분이 문제의 원인이었습니다. 엔진에서 색상 데이터를 안 보내주더라도 에러 없이 띄우도록 .get()으로 방어했습니다.
     st.markdown(f"### {an.get('recommendation_color', '')} {an.get('recommendation', '분석 결과를 불러올 수 없습니다.')}")
     for d in an.get('details', []): st.success(d)
     
@@ -250,16 +258,20 @@ if "login_info" not in st.session_state:
         pin = st.text_input("PIN 번호 4자리", type="password", placeholder="숫자 4자리")
         
         if st.button("시작하기", use_container_width=True, type="primary"):
-            if not nick or not pin:
+            # 🌟 사용자가 입력한 값의 양옆 공백(띄어쓰기)을 모두 제거하여 클린하게 만듦
+            clean_nick = nick.strip()
+            clean_pin = pin.strip()
+            
+            if not clean_nick or not clean_pin:
                 st.error("닉네임과 PIN 번호를 모두 입력해주세요.")
             else:
                 sheet = get_db_sheet()
                 if sheet:
-                    res = load_user_favs(sheet, nick, pin)
+                    res = load_user_favs(sheet, clean_nick, clean_pin)
                     if res == "AUTH_FAIL":
                         st.error("⚠️ 비밀번호가 틀렸거나 이미 다른 사람이 사용 중인 닉네임입니다.")
                     else:
-                        st.session_state.login_info = {"nick": nick, "pin": pin}
+                        st.session_state.login_info = {"nick": clean_nick, "pin": clean_pin}
                         st.session_state.custom_stocks = res if res != "NEW_USER" else []
                         st.rerun()
                 else:
