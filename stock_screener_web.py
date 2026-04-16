@@ -12,16 +12,14 @@ import xml.etree.ElementTree as ET
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# 🌟 최상단 설정
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
-# 🌟 휑한 느낌을 없애고 1차 때의 꽉 찬 느낌을 살리는 '카드형 UI' 및 테이블 CSS
+# 🌟 주석을 지워서 화면에 노출되는 버그를 잡았습니다.
 st.markdown("""
     <meta name="format-detection" content="telephone=no">
     <style>
     div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
     
-    /* 꽉 찬 느낌의 카드형 위젯 스타일 */
     .metric-card {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
@@ -38,7 +36,6 @@ st.markdown("""
     .metric-delta.gray { color: #9e9e9e; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
     .metric-caption { color: #9e9e9e; font-size: 0.85rem; margin-top: 5px; }
 
-    /* 표(테이블) 디자인 깔끔하게 통일 */
     .custom-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     .custom-table th, .custom-table td { border-bottom: 1px solid #eeeeee; padding: 12px 8px; text-align: center; font-size: 0.95rem; }
     .custom-table th { background-color: #f8f9fa; color: #424242; font-weight: bold; }
@@ -62,7 +59,6 @@ def get_company_news(company_name):
         return [{"title": i.find('title').text, "link": i.find('link').text} for i in root.findall('.//item')[:5]]
     except: return []
 
-# 🌟 카드 UI를 그려주는 도우미 함수
 def draw_card(title, value_str, diff_val, diff_str, caption=""):
     color_cls = "red" if diff_val > 0 else ("blue" if diff_val < 0 else "gray")
     arrow = "▲ " if diff_val > 0 else ("▼ " if diff_val < 0 else "")
@@ -87,7 +83,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
 
     an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
     
-    # 🌟 핵심 방어막 복구: 분석 결과가 None이면 에러 뿜지 말고 여기서 차단!
     if not an:
         st.warning("⚠️ 상장 기간이 너무 짧거나 데이터가 부족하여 분석 지표를 계산할 수 없습니다.")
         return
@@ -107,7 +102,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     diff_txt = f"{diff:+,.2f}" if p_unit == "$" else f"{int(diff):+,}"
     conv_txt = f"약 {int(curr * exc_rate):,}원" if p_unit == "$" else ""
     
-    # 🌟 1차 버전의 꽉 찬 느낌을 주는 카드 디자인 적용
     c1.markdown(draw_card("현재가", f"{curr_txt}{p_unit}", diff, f"{diff_txt}{p_unit}", conv_txt), unsafe_allow_html=True)
     c2.markdown(draw_card("등락률", f"{chg:+.2f}%", diff, ""), unsafe_allow_html=True)
     
@@ -233,7 +227,6 @@ else:
                 if c3.button("❌", key=f"p_del_{i}", use_container_width=True):
                     st.session_state.custom_stocks.pop(i); st.rerun()
                 
-                # 🌟 관심종목 탭에서도 카드가 펼쳐지도록 적용
                 if st.session_state.port_code == s['code']:
                     render_report(fetcher, analyzer, exc_rate, s, f"tab2_{i}")
                     st.divider()
