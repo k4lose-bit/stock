@@ -9,7 +9,7 @@ import yfinance as yf
 import requests
 import xml.etree.ElementTree as ET
 
-# 💡 구글 시트 연동을 위한 라이브러리 추가
+# 💡 구글 시트 연동 라이브러리
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -17,7 +17,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# --- [🌟 구글 시트 데이터 동기화 함수 시작] ---
+# --- [🌟 구글 시트 다중 사용자 동기화 함수 시작] ---
 @st.cache_resource(ttl=300)
 def get_db_sheet():
     try:
@@ -29,17 +29,19 @@ def get_db_sheet():
     except Exception as e:
         return None
 
-def sync_load_favs(sheet):
+def load_user_favs(sheet, nickname, pin):
     try:
         records = sheet.get_all_records()
         for row in records:
-            # 단일 비밀번호 체계이므로 'Admin'이라는 고유 이름으로 저장/불러오기
-            if str(row.get('Nickname', '')) == 'Admin':
-                return json.loads(row.get('Favorites', "[]"))
-    except: pass
-    return []
+            if str(row.get('Nickname', '')) == nickname:
+                if str(row.get('PIN', '')) == pin:
+                    return json.loads(row.get('Favorites', "[]"))
+                else: 
+                    return "AUTH_FAIL" # 비밀번호 틀림
+        return "NEW_USER" # 새로운 닉네임
+    except: return []
 
-def sync_save_favs(sheet, fav_list):
+def save_user_favs(sheet, nickname, pin, fav_list):
     try:
         fav_json = json.dumps(fav_list, ensure_ascii=False)
         records = sheet.get_all_records()
@@ -47,18 +49,18 @@ def sync_save_favs(sheet, fav_list):
         # 시트가 아예 비어있으면 헤더부터 생성
         if not records:
             sheet.append_row(['Nickname', 'PIN', 'Favorites'])
-            sheet.append_row(['Admin', '1234', fav_json])
+            sheet.append_row([nickname, pin, fav_json])
             return
             
         for idx, row in enumerate(records):
-            if str(row.get('Nickname', '')) == 'Admin':
+            if str(row.get('Nickname', '')) == nickname:
                 sheet.update_cell(idx + 2, 3, fav_json)
                 return
                 
-        # Admin 기록이 없으면 추가
-        sheet.append_row(['Admin', '1234', fav_json])
+        # 기존에 없던 닉네임이면 새 줄에 추가
+        sheet.append_row([nickname, pin, fav_json])
     except: pass
-# --- [🌟 구글 시트 데이터 동기화 함수 끝] ---
+# --- [🌟 구글 시트 동기화 함수 끝] ---
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
@@ -77,10 +79,9 @@ div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
 .custom-table th, .custom-table td { border-bottom: 1px solid #eeeeee; padding: 12px 8px; text-align: center; font-size: 0.95rem; }
 .custom-table th { background-color: #f8f9fa; color: #424242; font-weight: bold; }
 .guide-box { background-color: #f0f7ff; border-left: 5px solid #1E90FF; padding: 15px; border-radius: 5px; margin-top: 15px; font-size: 0.95rem; }
+.disclaimer { text-align: center; color: #9e9e9e; font-size: 0.85rem; margin-top: 50px; padding: 20px; border-top: 1px solid #eeeeee; }
 </style>
 """, unsafe_allow_html=True)
-
-CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
 
 @st.cache_data(ttl=3600)
 def get_exchange_rate():
@@ -114,7 +115,7 @@ def draw_card(title, value_str, diff_val, diff_str, caption=""):
 def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     data = fetcher.get_stock_data(item['code'])
     if not data:
-        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드(티커)나 네트워크를 확인해주세요.")
+        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드나 네트워크를 확인해주세요.")
         return
 
     an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
@@ -214,8 +215,8 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
 
     st.divider()
     st.subheader("💡 종합 분석 의견")
-    st.markdown(f"### {an.get('recommendation_color', '')} {an.get('recommendation', '')}")
-    for d in an.get('details', []): st.success(d)
+    st.markdown(f"### {an['recommendation_color']} {an['recommendation']}")
+    for d in an['details']: st.success(d)
     
     st.divider()
     
@@ -231,39 +232,57 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
             st.session_state.custom_stocks.append(item)
             
-            # 💡 [연동 포인트 1] 추가 시 구글 시트에 즉시 업로드
+            # 💡 [연동 포인트] 내 닉네임과 PIN으로 구글 시트에 즉시 업로드
             sheet = get_db_sheet()
-            if sheet: sync_save_favs(sheet, st.session_state.custom_stocks)
+            user = st.session_state.login_info
+            if sheet: save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
             
             st.rerun()
 
 # --- 메인 실행 로직 ---
-if "pw_ok" not in st.session_state: st.session_state.pw_ok = False
 if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
 if "search_history" not in st.session_state: st.session_state.search_history = []
 if "active_item" not in st.session_state: st.session_state.active_item = None
 if "port_code" not in st.session_state: st.session_state.port_code = None
 
-if not st.session_state.pw_ok:
+# 🌟 닉네임 + PIN 기반 로그인 시스템
+if "login_info" not in st.session_state:
     st.title("🚀 Stock Screener Pro")
     st.write("---")
     _, col, _ = st.columns([1, 1, 1])
     with col:
-        st.subheader("🔒 로그인")
-        pw = st.text_input("접속 비밀번호를 입력하세요", type="password")
-        if st.button("들어가기", use_container_width=True, type="primary"):
-            if hashlib.sha256(pw.encode()).hexdigest() == CORRECT_PASSWORD_HASH:
-                st.session_state.pw_ok = True
-                
-                # 💡 [연동 포인트 2] 로그인 성공 시 구글 시트에서 기존 관심종목 불러오기
+        st.subheader("🔒 접속하기")
+        nick = st.text_input("닉네임 (가입/로그인 겸용)", placeholder="아무 별명이나 입력하세요")
+        pin = st.text_input("PIN 번호 4자리", type="password", placeholder="숫자 4자리")
+        
+        if st.button("시작하기", use_container_width=True, type="primary"):
+            if not nick or not pin:
+                st.error("닉네임과 PIN 번호를 모두 입력해주세요.")
+            else:
                 sheet = get_db_sheet()
-                if sheet: 
-                    st.session_state.custom_stocks = sync_load_favs(sheet)
+                if sheet:
+                    res = load_user_favs(sheet, nick, pin)
+                    if res == "AUTH_FAIL":
+                        st.error("⚠️ 비밀번호가 틀렸거나 이미 다른 사람이 사용 중인 닉네임입니다.")
+                    else:
+                        st.session_state.login_info = {"nick": nick, "pin": pin}
+                        st.session_state.custom_stocks = res if res != "NEW_USER" else []
+                        st.rerun()
+                else:
+                    st.error("구글 시트 데이터베이스에 연결할 수 없습니다. (Secrets 키 확인 필요)")
                     
-                st.rerun()
-            else: st.error("비밀번호가 틀렸습니다.")
+    # 🌟 책임 회피용 문구 하단에 크게 삽입
+    st.markdown("<div class='disclaimer'>⚠️ <b>본 정보는 투자 참고용이며 책임지지 않습니다.</b> 제공되는 분석 지표와 의견은 시스템 알고리즘에 의한 것이며, 최종 투자 판단은 전적으로 사용자 본인에게 있습니다.</div>", unsafe_allow_html=True)
+
 else:
+    user = st.session_state.login_info
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
+    
+    st.sidebar.write(f"👤 **{user['nick']}** 님 접속 중")
+    if st.sidebar.button("🚪 로그아웃", type="primary"):
+        del st.session_state.login_info
+        st.session_state.custom_stocks = []
+        st.rerun()
     
     if datetime.now().day == 13:
         st.info("📅 오늘은 매월 13일, 종목 리스트 업데이트 권장일입니다.")
@@ -314,10 +333,9 @@ else:
                 if st.button("🗑️ 전체 삭제", use_container_width=True): 
                     st.session_state.custom_stocks = []
                     
-                    # 💡 [연동 포인트 3] 전체 삭제 내용 구글 시트에 즉시 반영
+                    # 💡 전체 삭제 후 즉시 시트 반영
                     sheet = get_db_sheet()
-                    if sheet: sync_save_favs(sheet, st.session_state.custom_stocks)
-                    
+                    if sheet: save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
                     st.rerun()
             
             for i, s in enumerate(st.session_state.custom_stocks):
@@ -330,10 +348,9 @@ else:
                 if c3.button("❌", key=f"p_del_{i}", use_container_width=True):
                     st.session_state.custom_stocks.pop(i)
                     
-                    # 💡 [연동 포인트 4] 개별 삭제 내용 구글 시트에 즉시 반영
+                    # 💡 개별 삭제 후 즉시 시트 반영
                     sheet = get_db_sheet()
-                    if sheet: sync_save_favs(sheet, st.session_state.custom_stocks)
-                    
+                    if sheet: save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
                     st.rerun()
                 
                 if st.session_state.port_code == s['code']:
@@ -341,19 +358,18 @@ else:
                     st.divider()
 
     with tab3:
-        # 🌟 관리자 탭 정리: 파일 업로드 기능 제거 & 다운로드 버튼 유지
         st.subheader("📥 데이터베이스 관리")
         st.info("""
         **💡 관리자 전용 DB 갱신 안내**
-        종목 데이터베이스 갱신은 보안을 위해 앱 외부(GitHub 또는 스트림릿 클라우드 파일 관리자)에서 직접 `krx_stock_list.csv` 파일을 덮어씌우는 방식으로 진행됩니다.
+        보안 및 안정성을 위해 종목 데이터베이스 갱신은 앱 외부(서버/깃허브)에서 진행됩니다.
+        1. [KRX 정보데이터시스템](http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201020101) 접속 > [기본통계] > [주식] > [종목정보] > [전종목 기본정보]
+        2. 우측 상단의 [⬇️ 다운로드] 버튼을 눌러 **CSV 파일**을 다운받습니다.
+        3. 앱 프로젝트 폴더의 `krx_stock_list.csv` 파일로 덮어씌워 주시면 반영됩니다.
         """)
         
         st.write("---")
         db_df = get_stock_db()
         csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📊 현재 앱에 적용된 종목 리스트 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list_active.csv", mime="text/csv")
-        
-        st.write("---")
-        if st.button("🚪 로그아웃", type="primary"):
-            st.session_state.pw_ok = False
-            st.rerun()
+    
+    st.markdown("<br><div class='disclaimer'>⚠️ <b>본 정보는 투자 참고용이며 책임지지 않습니다.</b></div>", unsafe_allow_html=True)
