@@ -61,31 +61,41 @@ div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
 .guide-box { background-color: #f0f7ff; border-left: 5px solid #1E90FF; padding: 15px; border-radius: 5px; margin-top: 15px; font-size: 0.95rem; }
 </style>""", unsafe_allow_html=True)
 
+# (이전 코드 상단 생략)
+
 # --- 로그인 세션 관리 ---
 if "login_info" not in st.session_state:
     st.title("🚀 Stock Screener Pro")
-    st.info("나만의 관심종목을 영구 저장하려면 닉네임과 PIN번호를 입력하세요.")
+    st.info("나만의 관심종목을 안전하게 보관하려면 닉네임과 PIN번호를 입력하세요.")
     
     _, col, _ = st.columns([1, 1, 1])
     with col:
-        nick = st.text_input("닉네임 (별명)", placeholder="예: 달호")
-        pin = st.text_input("PIN 번호 (숫자 4자리)", type="password", placeholder="0000")
+        # 🌟 닉네임 예시를 더 범용적이고 깔끔하게 수정했습니다.
+        nick = st.text_input("닉네임 (ID)", placeholder="예: 스톡마스터, 투자왕, user01 등")
+        pin = st.text_input("보안 PIN 번호 (숫자 4자리)", type="password", placeholder="숫자 4자리 입력")
         
-        if st.button("로그인 / 시작하기", use_container_width=True, type="primary"):
+        if st.button("로그인 및 데이터 동기화", use_container_width=True, type="primary"):
             if not nick or not pin:
-                st.warning("닉네임과 PIN을 모두 입력해주세요.")
+                st.warning("닉네임과 보안 PIN을 모두 입력해 주세요.")
+            elif not pin.isdigit() or len(pin) != 4:
+                st.warning("PIN 번호는 숫자 4자리로 입력해야 합니다.")
             else:
-                sheet = get_db_sheet()
-                if sheet:
-                    res = load_user_favs(sheet, nick, pin)
-                    if res == "AUTH_FAIL":
-                        st.error("이미 사용 중인 닉네임이거나 PIN 번호가 틀립니다.")
-                    else:
-                        st.session_state.login_info = {"nick": nick, "pin": pin}
-                        try:
-                            st.session_state.custom_stocks = json.loads(res) if res != "NEW_USER" else []
-                        except: st.session_state.custom_stocks = []
-                        st.rerun()
+                with st.spinner("구글 클라우드 데이터베이스에 연결 중..."):
+                    sheet = get_db_sheet()
+                    if sheet:
+                        res = load_user_favs(sheet, nick, pin)
+                        if res == "AUTH_FAIL":
+                            st.error("이미 등록된 닉네임입니다. PIN 번호가 틀렸거나 다른 닉네임을 사용해 주세요.")
+                        else:
+                            st.session_state.login_info = {"nick": nick, "pin": pin}
+                            try:
+                                st.session_state.custom_stocks = json.loads(res) if res != "NEW_USER" else []
+                                st.success(f"반갑습니다, {nick}님! 데이터 로딩 완료.")
+                                time.sleep(1) # 성공 메시지를 잠시 보여줌
+                            except: 
+                                st.session_state.custom_stocks = []
+                            st.rerun()
+
 else:
     # --- 메인 앱 ---
     user = st.session_state.login_info
