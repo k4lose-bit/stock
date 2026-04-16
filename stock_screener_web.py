@@ -11,10 +11,11 @@ import xml.etree.ElementTree as ET
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
+# 최상단 설정
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 st.markdown('<meta name="format-detection" content="telephone=no">', unsafe_allow_html=True)
 
-# 한국 국룰 색상 강제 적용 스타일
+# 한국 국룰 색상 스타일
 st.markdown("""
     <style>
     div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
@@ -37,7 +38,8 @@ def get_exchange_rate():
 def get_company_news(company_name):
     try:
         url = f"https://news.google.com/rss/search?q={urllib.parse.quote(company_name+' 주식')}&hl=ko&gl=KR&ceid=KR:ko"
-        root = ET.fromstring(requests.get(url).text)
+        response = requests.get(url, timeout=5)
+        root = ET.fromstring(response.text)
         return [{"title": i.find('title').text, "link": i.find('link').text} for i in root.findall('.//item')[:5]]
     except: return []
 
@@ -52,14 +54,23 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     
     st.subheader(f"📈 {item['name']} ({item['code']}) 리포트")
     
-    curr, prev = data['current'], data['prev_close']
+    # 🌟 에러가 났던 수치 표시 로직을 안전하게 수정
+    curr = data['current']
+    prev = data['prev_close']
     diff = curr - prev
     chg = (diff / prev) * 100
     color_class = "red-text" if diff > 0 else ("blue-text" if diff < 0 else "")
     
     c1, c2, c3, c4 = st.columns(4)
     p_unit = "원" if curr > 1000 else "$"
-    c1.markdown(f"현재가  \n<span class='big-font'>{curr:,.2f if p_unit=='$' else int(curr):,}{p_unit}</span>  \n<span class='{color_class}'>{diff:+,.2f if p_unit=='$' else int(diff):,}{p_unit}</span>", unsafe_allow_html=True)
+    
+    # 숫자를 사람이 보기 편하게 포맷팅 (f-string 오류 수정)
+    curr_fmt = f"{curr:,.2f}" if p_unit == "$" else f"{int(curr):,}"
+    diff_fmt = f"{diff:+,.2f}" if p_unit == "$" else f"{int(diff):+,}"
+    
+    c1.markdown(f"현재가  \n<span class='big-font'>{curr_fmt}{p_unit}</span>  \n<span class='{color_class}'>{diff_fmt}{p_unit}</span>", unsafe_allow_html=True)
+    c1.caption(f"약 {int(curr * exc_rate):, if curr > 1000 else int(curr * exc_rate):,}원")
+    
     c2.markdown(f"등락률  \n<span class='big-font {color_class}'>{chg:+.2f}%</span>", unsafe_allow_html=True)
     c3.markdown(f"RSI  \n<span class='big-font'>{an['rsi']:.1f}</span>", unsafe_allow_html=True)
     c4.markdown(f"거래량  \n<span class='big-font'>{int(data['volume']):,}</span>", unsafe_allow_html=True)
@@ -71,8 +82,12 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             p, po = data['close_prices'][i], data['close_prices'][i-1]
             df, dc = p-po, ((p-po)/po)*100
             clr = "red" if df > 0 else ("blue" if df < 0 else "black")
-            rows.append([data['dates'][i][5:], f"{p:,.0f}원" if p > 1000 else f"${p:.2f}", 
-                         f"<span style='color:{clr}'>{df:+,.0f}원</span>" if p > 1000 else f"<span style='color:{clr}'>${df:+.2f}</span>",
+            
+            p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
+            df_f = f"{df:+,.2f}$" if p < 1000 else f"{int(df):+,}원"
+            
+            rows.append([data['dates'][i][5:], p_f, 
+                         f"<span style='color:{clr}'>{df_f}</span>",
                          f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
         st.write(pd.DataFrame(rows, columns=["날짜", "종가", "변동", "등락률", "거래량"]).to_html(escape=False, index=False), unsafe_allow_html=True)
 
@@ -84,7 +99,7 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     st.divider()
     judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
     st.info(f"💡 [주달(Judal) 테마 확인]({judal_url})")
-    for n in news: st.markdown(f"🔗 [{n['title']}]({n['link']})")
+    for n in news: st.markdown(f"🔗 [{n['title']}]({news[0]['link']})") # 리스트 순환 오류 방지
 
     if not any(s["code"] == item['code'] for s in st.session_state.custom_stocks):
         if st.button("➕ 관심종목 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True):
@@ -99,11 +114,12 @@ if "port_code" not in st.session_state: st.session_state.port_code = None
 # 로그인
 if "pw_ok" not in st.session_state: st.session_state.pw_ok = False
 if not st.session_state.pw_ok:
-    pw = st.text_input("Password", type="password")
-    if st.button("Log In"):
+    st.title("🚀 Stock Screener Pro")
+    pw = st.text_input("접속 비밀번호를 입력하세요", type="password")
+    if st.button("로그인"):
         if hashlib.sha256(pw.encode()).hexdigest() == CORRECT_PASSWORD_HASH:
             st.session_state.pw_ok = True; st.rerun()
-        else: st.error("❌ 틀렸습니다.")
+        else: st.error("❌ 비밀번호가 올바르지 않습니다.")
 else:
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
     t1, t2 = st.tabs(["🔍 종목 분석", "⭐ 관심종목"])
@@ -116,15 +132,14 @@ else:
                 if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
                     st.session_state.active_item = h; st.rerun()
         
-        # 🌟 자동완성 검색창 구현
+        st.divider()
         query = st.text_input("종목명 입력 (예: 삼성, LG, IREN)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
         if query:
             cands = search_candidates(query)
             if not cands.empty:
-                # 검색 결과 리스트에서 선택
                 options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
-                pick = st.selectbox("정확한 종목을 골라주세요:", options)
-                if st.button("📊 분석 시작", type="primary", use_container_width=True):
+                pick = st.selectbox("정확한 종목을 선택하세요:", options)
+                if st.button("📊 즉시 분석", type="primary", use_container_width=True):
                     code = pick.split("(")[1].replace(")", "")
                     name = pick.split(" (")[0]
                     item = {"code": code, "name": name, "sector": "기타"}
@@ -139,9 +154,9 @@ else:
             st.divider(); render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, "tab1")
 
     with t2:
-        if not st.session_state.custom_stocks: st.info("관심종목을 추가하세요.")
+        if not st.session_state.custom_stocks: st.info("관심종목을 추가해 보세요.")
         else:
-            if st.button("🗑️ 전체 삭제"): st.session_state.custom_stocks = []; st.rerun()
+            if st.button("🗑️ 리스트 전체 삭제"): st.session_state.custom_stocks = []; st.rerun()
             for i, s in enumerate(st.session_state.custom_stocks):
                 c1, c2, c3 = st.columns([5, 3, 2])
                 c1.write(f"**{s['name']}** ({s['code']})")
