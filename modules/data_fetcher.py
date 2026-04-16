@@ -4,72 +4,102 @@ import yfinance as yf
 import re
 import os
 
-@st.cache_data(ttl=60 * 60 * 24)
+# 🌟 서학개미(해외주식) 전용 스마트 한글-티커 사전
+# 여기에 자주 찾는 해외 주식의 한글 이름과 티커를 적어두면 한글로도 검색이 됩니다!
+US_STOCK_DICT = {
+    "애플": "AAPL", "테슬라": "TSLA", "엔비디아": "NVDA", "마이크로소프트": "MSFT",
+    "구글": "GOOGL", "알파벳": "GOOGL", "아마존": "AMZN", "메타": "META", "페이스북": "META",
+    "넷플릭스": "NFLX", "에이엠디": "AMD", "인텔": "INTC", "티에스엠씨": "TSM",
+    "팔란티어": "PLTR", "아이온큐": "IONQ", "쿠팡": "CPNG", "노키아": "NOK",
+    "아이렌": "IREN", "비티큐": "BTQ", "코인베이스": "COIN", "마이크로스트레티지": "MSTR",
+    "에이에스엠엘": "ASML", "브로드컴": "AVGO", "퀄컴": "QCOM", "일라이릴리": "LLY",
+    "티큐": "TQQQ", "속슬": "SOXL", "슈드": "SCHD", "스파이": "SPY", "큐큐큐": "QQQ"
+}
+
 def get_stock_db():
-    # 🌟 앱 배포 후에는 이 로컬 파일을 읽어오는 것이 가장 확실합니다.
+    if "uploaded_db" in st.session_state and st.session_state.uploaded_db is not None:
+        return st.session_state.uploaded_db
+        
     csv_path = "krx_stock_list.csv"
     if os.path.exists(csv_path):
         try:
             try:
                 df = pd.read_csv(csv_path, encoding='utf-8', dtype=str)
-            except:
+            except UnicodeDecodeError:
                 df = pd.read_csv(csv_path, encoding='cp949', dtype=str)
             
-            # 컬럼명 전처리 (에러 방지 핵심)
-            df.columns = [str(c).strip().replace(" ", "") for c in df.columns]
-            
+            df.columns = df.columns.str.replace(" ", "")
             col_map = {}
             for c in df.columns:
                 if c in ['단축코드', '종목코드', '코드', 'CODE']: col_map[c] = '종목코드'
                 elif c in ['한글종목약명', '종목명', '회사명', 'NAME']: col_map[c] = '회사명'
-            
+                elif c in ['시장구분', '업종명', '섹터', 'SECTOR']: col_map[c] = '섹터'
+                
+            if '회사명' not in col_map.values():
+                for c in df.columns:
+                    if c == '한글종목명': col_map[c] = '회사명'
+
             df = df.rename(columns=col_map)
-            df = df.loc[:, ~df.columns.duplicated()] # 중복 컬럼 제거
+            df = df.loc[:, ~df.columns.duplicated()]
             
             if '종목코드' in df.columns and '회사명' in df.columns:
-                # 🌟 str 속성 에러 방지를 위해 강제 형변환 후 처리
                 df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
                 df['회사명'] = df['회사명'].astype(str).str.strip()
-                return df[['종목코드', '회사명']].dropna()
+                if '섹터' not in df.columns: df['섹터'] = '기타'
+                return df[['종목코드', '회사명', '섹터']].dropna()
         except Exception as e:
-            st.error(f"데이터베이스 로드 중 오류: {e}")
+            print(f"CSV 로드 에러: {e}")
 
-    # 비상용 기본 데이터
-    return pd.DataFrame([{'회사명': '삼성전자', '종목코드': '005930'}])
+    return pd.DataFrame([
+        {'회사명': '삼성전자', '종목코드': '005930', '섹터': '반도체'},
+        {'회사명': 'SK하이닉스', '종목코드': '000660', '섹터': '반도체'},
+        {'회사명': 'LG', '종목코드': '003550', '섹터': '지주사'}
+    ])
 
 def search_candidates(query, limit=15):
     df = get_stock_db()
-    q = str(query).strip().upper()
+    q = (query or "").strip().upper()
     if not q: return df.head(0)
     
-    # 띄어쓰기 무시 검색
     q_no_space = q.replace(" ", "")
-    df['search_name'] = df['회사명'].astype(str).str.replace(" ", "").str.upper()
+    df['검색용회사명'] = df['회사명'].str.replace(" ", "").str.upper()
     
-    results = df[df["search_name"].str.contains(q_no_space, na=False)].copy()
+    results = df[df["검색용회사명"].str.contains(q_no_space, na=False)].copy()
+    results = results.drop(columns=['검색용회사명'])
     
-    if re.match(r'^[A-Z]+$', q): # 영문 티커 처리
-        us_row = pd.DataFrame([{'회사명': q, '종목코드': q}])
+    # 1. 영문 티커 직접 입력 시 처리
+    if re.match(r'^[A-Z]+$', q):
+        us_row = pd.DataFrame([{'회사명': q, '종목코드': q, '섹터': '해외주식'}])
         results = pd.concat([us_row, results])
         
+    # 2. 🌟 한글로 검색한 내용이 '스마트 사전'에 있으면 자동으로 결과에 추가!
+    for kr_name, ticker in US_STOCK_DICT.items():
+        if q_no_space in kr_name:
+            us_row = pd.DataFrame([{'회사명': kr_name, '종목코드': ticker, '섹터': '해외주식'}])
+            results = pd.concat([us_row, results])
+            
     return results.drop_duplicates(subset=['종목코드']).head(limit)
 
 class DataFetcher:
-    def get_stock_data(self, code):
+    @st.cache_data(ttl=600)
+    def get_stock_data(_self, code):
         try:
-            symbol = f"{code}.KS" if (str(code).isdigit() and len(str(code)) == 6) else code
+            symbol = f"{code}.KS" if (code.isdigit() and len(code) == 6) else code
             stock = yf.Ticker(symbol)
             df = stock.history(period="3mo")
-            if df.empty and str(code).isdigit():
-                df = yf.Ticker(f"{code}.KQ").history(period="3mo")
-            if df.empty: return None
+            
+            if df.empty and code.isdigit():
+                symbol = f"{code}.KQ"
+                df = yf.Ticker(symbol).history(period="3mo")
+            if df is None or len(df) < 2: return None
             
             return {
                 "current": float(df['Close'].iloc[-1]),
+                "open": float(df['Open'].iloc[-1]),
                 "prev_close": float(df['Close'].iloc[-2]),
                 "volume": float(df['Volume'].iloc[-1]),
-                "close_prices": df["Close"].tolist(),
-                "volumes": df["Volume"].tolist(),
+                "close_prices": df["Close"].astype(float).tolist(),
+                "volumes": df["Volume"].astype(float).tolist(),
                 "dates": df.index.strftime('%Y.%m.%d').tolist()
             }
         except: return None
