@@ -1,4 +1,3 @@
-<div style="border: 1px solid #d3d3d3; padding: 15px; border-radius: 5px; font-family: monospace; line-height: 1.5; background-color: transparent; white-space: pre; overflow-x: auto;">
 import pandas as pd
 import requests
 import time
@@ -140,4 +139,3 @@ def get_stock_data(self, code):
     if isinstance(offline_map, dict) and code in offline_map:
         return offline_map[code]
     return self.get_stock_data_live(code)
-</div>
