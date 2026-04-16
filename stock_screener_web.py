@@ -11,9 +11,16 @@ from deep_translator import GoogleTranslator
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# 🌟 [해결책] 브라우저가 숫자를 전화번호 링크(밑줄)로 인식하지 못하게 막는 설정 주입
+# 🌟 최상단 설정: 전화번호 자동링크 방지 및 레이아웃 설정
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
-st.markdown('<meta name="format-detection" content="telephone=no">', unsafe_allow_html=True)
+st.markdown("""
+    <meta name="format-detection" content="telephone=no">
+    <style>
+        /* 숫자에 생기는 파란색 링크 및 밑줄 강제 제거 */
+        a[href^="tel"] { color: inherit !important; text-decoration: none !important; }
+        div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
+    </style>
+""", unsafe_allow_html=True)
 
 CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
 
@@ -22,237 +29,170 @@ def get_exchange_rate():
     try:
         rate = yf.Ticker("USDKRW=X").history(period="1d")
         return float(rate['Close'].iloc[-1])
-    except Exception:
-        return 1400.0
+    except: return 1400.0
 
 @st.cache_data(ttl=3600)
 def get_company_news(company_name, limit=5):
     try:
         search_query = urllib.parse.quote(f"{company_name} 주식 when:7d")
         url = f"https://news.google.com/rss/search?q={search_query}&hl=ko&gl=KR&ceid=KR:ko"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, timeout=5)
         root = ET.fromstring(response.text)
-        news_list = []
-        for item in root.findall('.//item')[:limit]:
-            news_list.append({"title": item.find('title').text, "link": item.find('link').text})
-        return news_list
-    except Exception:
-        return []
+        return [{"title": i.find('title').text, "link": i.find('link').text} for i in root.findall('.//item')[:limit]]
+    except: return []
 
 @st.cache_data(ttl=3600*24)
 def get_company_profile(code):
     try:
-        if code.isdigit() and len(code) == 6:
-            stock = yf.Ticker(code + ".KS")
-            info = stock.info
-            if 'longBusinessSummary' not in info:
-                stock = yf.Ticker(code + ".KQ")
-                info = stock.info
-        else:
-            stock = yf.Ticker(code)
-            info = stock.info
+        ticker = (code + ".KS") if (code.isdigit() and len(code) == 6) else code
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        if code.isdigit() and 'longBusinessSummary' not in info:
+            info = yf.Ticker(code + ".KQ").info
             
-        raw_sector = info.get("sector", "알 수 없음")
-        raw_industry = info.get("industry", "알 수 없음")
-        raw_summary = info.get("longBusinessSummary", "기업 개요 데이터가 제공되지 않습니다.")
-        
-        translator = GoogleTranslator(source='auto', target='ko')
-        try:
-            ko_sector = translator.translate(raw_sector) if raw_sector != "알 수 없음" else raw_sector
-            ko_industry = translator.translate(raw_industry) if raw_industry != "알 수 없음" else raw_industry
-            ko_summary = translator.translate(raw_summary) if raw_summary != "기업 개요 데이터가 제공되지 않습니다." else raw_summary
-        except Exception:
-            ko_sector, ko_industry, ko_summary = raw_sector, raw_industry, raw_summary
-            
+        trans = GoogleTranslator(source='auto', target='ko')
+        sum_raw = info.get("longBusinessSummary", "개요 없음")
         return {
-            "sector": ko_sector, "industry": ko_industry, "summary": ko_summary,
+            "sector": trans.translate(info.get("sector", "알 수 없음")),
+            "industry": trans.translate(info.get("industry", "알 수 없음")),
+            "summary": trans.translate(sum_raw) if len(sum_raw) > 5 else sum_raw,
             "website": info.get("website", ""), "marketCap": info.get("marketCap", 0),
             "pe": info.get("trailingPE", 0), "eps": info.get("trailingEps", 0),
             "div_yield": info.get("dividendYield", 0), "high52": info.get("fiftyTwoWeekHigh", 0),
             "low52": info.get("fiftyTwoWeekLow", 0)
         }
-    except Exception:
-        return None
+    except: return None
 
 def check_password():
-    if "password_correct" not in st.session_state: 
-        st.session_state["password_correct"] = False
+    if "password_correct" not in st.session_state: st.session_state["password_correct"] = False
     if not st.session_state["password_correct"]:
-        st.warning("🔒 안전한 사용을 위해 비밀번호를 입력해 주세요.")
-        pw_input = st.text_input("접속 비밀번호", type="password", key="pw_input")
-        if st.button("로그인", key="login_btn", type="primary"):
-            if hashlib.sha256(pw_input.encode("utf-8")).hexdigest() == CORRECT_PASSWORD_HASH:
+        st.warning("🔒 비밀번호를 입력해 주세요.")
+        pw = st.text_input("Password", type="password")
+        if st.button("Log In", type="primary"):
+            if hashlib.sha256(pw.encode()).hexdigest() == CORRECT_PASSWORD_HASH:
                 st.session_state["password_correct"] = True
                 st.rerun()
-            else:
-                st.error("❌ 비밀번호가 틀렸습니다.")
+            else: st.error("❌ 틀렸습니다.")
         return False
     return True
 
-def add_to_history(code, name, sector):
-    item = {"code": code, "name": name, "sector": sector}
+def add_to_history(item):
     if "search_history" not in st.session_state: st.session_state.search_history = []
-    if item in st.session_state.search_history:
-        st.session_state.search_history.remove(item)
+    st.session_state.search_history = [i for i in st.session_state.search_history if i["code"] != item["code"]]
     st.session_state.search_history.insert(0, item)
-    if len(st.session_state.search_history) > 10:
-        st.session_state.search_history.pop()
+    st.session_state.search_history = st.session_state.search_history[:10]
 
-def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
-    with st.spinner(f"{name} 데이터 분석 중..."):
-        data = fetcher.get_stock_data(code)
-        news_list = get_company_news(name)
-        profile = get_company_profile(code)
-        
-        if not data:
-            st.error("데이터를 가져올 수 없습니다.")
+def render_report(fetcher, analyzer, exc_rate, item):
+    with st.spinner(f"{item['name']} 분석 중..."):
+        data = fetcher.get_stock_data(item['code'])
+        if not data: 
+            st.error("데이터 수집 불가")
             return
-
-        an = analyzer.analyze(code, name, sector, data)
-        if not an: return
-
-        st.header(f"📈 {name} 상세 분석 리포트")
+        an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
+        prof = get_company_profile(item['code'])
         
+        st.header(f"📈 {item['name']} 상세 분석")
         c1, c2, c3, c4 = st.columns(4)
         curr = an['current']
-        prev_close = data.get("prev_close", curr)
-        day_diff = curr - prev_close
+        diff = curr - data['prev_close']
+        p_str = f"{int(curr):,}원" if curr > 1000 else f"${curr:.2f}"
+        d_str = f"{int(diff):+,}원" if curr > 1000 else f"${diff:+.2f}"
         
-        if curr > 1000:
-            krw_price = f"{int(curr):,}원"
-            day_diff_str = f"{int(day_diff):+,}원"
-            sub_price = f"약 {int(curr * exc_rate):,}원"
-        else:
-            krw_price = f"${curr:.2f}"
-            day_diff_str = f"${day_diff:+.2f}"
-            sub_price = f"약 {int(curr * exc_rate):,}원"
-            
-        c1.metric("현재가", krw_price, day_diff_str)
-        c1.caption(sub_price)
-        
-        c2.metric("당일 등락률", f"{an['change']:.2f}%")
+        c1.metric("현재가", p_str, d_str)
+        c1.caption(f"약 {int(curr * exc_rate):,}원")
+        c2.metric("등락률", f"{an['change']:.2f}%")
         c3.metric("RSI", f"{an['rsi']:.1f}")
         c4.metric("거래량", f"{int(an['volume']):,}")
         
-        st.write("") 
-        
-        dates = data.get("dates", [])
-        prices = data.get("close_prices", [])
-        volumes = data.get("volumes", [])
-        
-        if len(dates) >= 20: 
-            st.markdown("#### 🕒 최근 5거래일 추이 (전일 대비)")
-            history_data = []
+        if len(data['dates']) >= 10:
+            st.write("#### 🕒 최근 5거래일 추이")
+            hist = []
             for i in range(-2, -7, -1):
-                if abs(i-1) > len(dates): break
-                d_short = dates[i][5:]
-                p_past = prices[i]
-                p_before = prices[i-1]
-                diff_prev = p_past - p_before
-                chg = ((p_past - p_before) / p_before) * 100
-                p_past_fmt = f"{int(p_past):,}원" if curr > 1000 else f"${p_past:.2f}"
-                diff_fmt = f"{int(diff_prev):+,}원" if curr > 1000 else f"${diff_prev:+.2f}"
-                rsi_val = analyzer.indicator.calculate_rsi(prices[:i+1])
-                rsi_fmt = f"{rsi_val:.1f}" if rsi_val is not None else "-"
-                history_data.append({
-                    "날짜": d_short, "종가": p_past_fmt, "전일대비": diff_fmt,
-                    "등락률": f"{chg:+.2f}%", "RSI": rsi_fmt, "거래량": f"{int(volumes[i]):,}"
+                p_past, p_old = data['close_prices'][i], data['close_prices'][i-1]
+                df_val = p_past - p_old
+                hist.append({
+                    "날짜": data['dates'][i][5:],
+                    "종가": f"{int(p_past):,}원" if curr > 1000 else f"${p_past:.2f}",
+                    "전일대비": f"{int(df_val):+,}원" if curr > 1000 else f"${df_val:+.2f}",
+                    "등락률": f"{((p_past-p_old)/p_old)*100:+.2f}%",
+                    "거래량": f"{int(data['volumes'][i]):,}"
                 })
-            st.table(pd.DataFrame(history_data).set_index("날짜"))
+            st.table(pd.DataFrame(hist).set_index("날짜"))
 
         st.divider()
-        st.subheader("🏢 기업 개요 및 펀더멘탈")
-        if profile:
-            st.markdown(f"**섹터:** {profile['sector']} | **산업군:** {profile['industry']}")
-            if profile['website']: st.markdown(f"**웹사이트:** [{profile['website']}]({profile['website']})")
-            
+        if prof:
+            st.subheader("🏢 기업 정보")
+            st.write(f"**섹터:** {prof['sector']} | **산업:** {prof['industry']}")
             f1, f2, f3, f4, f5 = st.columns(5)
-            mc = profile.get('marketCap', 0)
-            mc_str = (f"{mc // 100000000:,}억 원" if code.isdigit() else f"${mc // 1000000:,}M") if mc else "-"
-            f1.metric("시가총액", mc_str)
-            f2.metric("PER", f"{profile['pe']:.2f}" if profile.get('pe') else "-")
-            f3.metric("EPS", f"{profile['eps']:.2f}" if profile.get('eps') else "-")
-            dy = profile.get('div_yield')
-            f4.metric("배당률", f"{dy*100:.2f}%" if dy else "-")
-            
-            # 🌟 [해결책] 52주 고/저 수치에 콤마를 넣어 브라우저의 오인식을 방지
-            h52, l52 = profile.get('high52'), profile.get('low52')
-            if h52 and l52:
-                h_fmt = f"{int(h52):,}" if h52 > 1000 else f"{h52:.2f}"
-                l_fmt = f"{int(l52):,}" if l52 > 1000 else f"{l52:.2f}"
-                f5.metric("52주 고/저", f"{l_fmt} ~ {h_fmt}")
-            else:
-                f5.metric("52주 고/저", "-")
-                
-            st.info(profile['summary'])
+            mc = prof['marketCap']
+            f1.metric("시가총액", f"{mc//100000000:,}억" if item['code'].isdigit() else f"${mc//1000000:,}M")
+            f2.metric("PER", f"{prof['pe']:.1f}" if prof['pe'] else "-")
+            f3.metric("EPS", f"{prof['eps']:.1f}" if prof['eps'] else "-")
+            f4.metric("배당률", f"{prof['div_yield']*100:.1f}%" if prof['div_yield'] else "-")
+            # 🌟 취소선 방지를 위해 단순 텍스트로 고/저 표시
+            h, l = prof['high52'], prof['low52']
+            f5.write("**52주 고/저**")
+            f5.write(f"{l:,.0f} ~ {h:,.0f}" if h else "-")
+            st.info(prof['summary'])
 
         st.divider()
         st.subheader("💡 분석 의견")
-        st.markdown(f"### {an['recommendation_color']} **{an['recommendation']}**")
-        for detail in an['details']: st.success(detail)
+        st.markdown(f"### {an['recommendation_color']} {an['recommendation']}")
+        for d in an['details']: st.success(d)
         
         st.divider()
-        st.subheader(f"📰 '{name}' 최근 뉴스")
-        judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(name)}+투자분석"
-        st.info(f"💡 [주달(Judal)에서 '{name}' 테마 확인하기]({judal_url})")
-        if news_list:
-            for news in news_list: st.markdown(f"🔗 [{news['title']}]({news['link']})")
-        else: st.write("최근 뉴스가 없습니다.")
+        if not any(s["code"] == item['code'] for s in st.session_state.custom_stocks):
+            if st.button("➕ 관심종목 추가", use_container_width=True, type="primary"):
+                st.session_state.custom_stocks.append(item)
+                st.rerun()
 
-        st.divider()
-        if not any(s["code"] == code for s in st.session_state.custom_stocks):
-            if st.button("➕ 관심종목 추가", type="primary", use_container_width=True, key=f"add_{code}"):
-                st.session_state.custom_stocks.append({"code": code, "name": name, "sector": sector})
-                st.success("추가되었습니다!"); time.sleep(1); st.rerun()
-
-# --- App UI ---
-st.markdown("<style>div[data-baseweb='input'] { border: 2px solid #1E90FF !important; }</style>", unsafe_allow_html=True)
-st.title("🚀 Stock Screener Pro")
-
+# --- App Logic ---
 if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
 if "search_history" not in st.session_state: st.session_state.search_history = []
-if "active_analysis" not in st.session_state: st.session_state.active_analysis = None
+if "active_item" not in st.session_state: st.session_state.active_item = None
+if "current_tab" not in st.session_state: st.session_state.current_tab = "🔍 분석"
 
 if check_password():
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
-    with st.sidebar:
-        if st.button("로그아웃"): st.session_state["password_correct"] = False; st.rerun()
+    
+    # 탭 생성 (session_state와 연동하여 강제 전환 가능하게 설정)
+    tabs = ["🔍 분석", "⭐ 관심종목"]
+    selected_tab = st.sidebar.radio("Menu", tabs, index=tabs.index(st.session_state.current_tab))
+    st.session_state.current_tab = selected_tab
 
-    tab1, tab2 = st.tabs(["🔍 분석", "⭐ 관심종목"])
-
-    with tab1:
+    if st.session_state.current_tab == "🔍 분석":
         if st.session_state.search_history:
             cols = st.columns(5)
             for i, h in enumerate(st.session_state.search_history):
                 if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
-                    st.session_state.active_analysis = h; st.rerun()
-        st.divider()
-        query = st.text_input("종목 검색", placeholder="삼성전자, IREN...", key="q")
+                    st.session_state.active_item = h; st.rerun()
+        
+        query = st.text_input("종목 검색 (IREN, BTQ, 삼성전자...)", key="main_search")
         if query:
-            cands = search_candidates(query, limit=10)
+            cands = search_candidates(query, limit=5)
             if not cands.empty:
-                opts = [f"{row['회사명']} ({row['종목코드']})" for _, row in cands.iterrows()]
-                pick = st.selectbox("종목 선택", opts)
-                idx = opts.index(pick)
-                code = str(cands.iloc[idx]["종목코드"]).zfill(6) if str(cands.iloc[idx]["종목코드"]).isdigit() else str(cands.iloc[idx]["종목코드"])
-                name, sector = str(cands.iloc[idx]["회사명"]), str(cands.iloc[idx].get("섹터", "기타"))
-                if st.button("📊 분석 시작", type="primary", use_container_width=True):
-                    st.session_state.active_analysis = {"code": code, "name": name, "sector": sector}
-                    add_to_history(code, name, sector); st.rerun()
+                pick = st.selectbox("검색 결과 선택", [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()])
+                if st.button("📊 분석 시작", type="primary"):
+                    code_raw = pick.split("(")[1].replace(")", "")
+                    name_raw = pick.split(" (")[0]
+                    item = {"code": code_raw, "name": name_raw, "sector": "기타"}
+                    st.session_state.active_item = item
+                    add_to_history(item); st.rerun()
 
-        if st.session_state.active_analysis:
+        if st.session_state.active_item:
             st.divider()
-            t = st.session_state.active_analysis
-            render_analysis_report(fetcher, analyzer, exc_rate, t["code"], t["name"], t["sector"])
+            render_report(fetcher, analyzer, exc_rate, st.session_state.active_item)
 
-    with tab2:
-        if not st.session_state.custom_stocks: st.info("관심종목을 추가해 보세요.")
+    elif st.session_state.current_tab == "⭐ 관심종목":
+        if not st.session_state.custom_stocks: st.info("관심종목이 없습니다.")
         else:
-            if st.button("🗑️ 리스트 비우기"): st.session_state.custom_stocks = []; st.rerun()
             for i, s in enumerate(st.session_state.custom_stocks):
                 c1, c2, c3 = st.columns([5, 3, 2])
-                c1.markdown(f"**{s['name']}**")
-                if c2.button("📊 분석", key=f"pa_{i}", use_container_width=True):
-                    st.session_state.active_analysis = s; add_to_history(s['code'], s['name'], s['sector']); st.rerun()
-                if c3.button("❌", key=f"pd_{i}", use_container_width=True): st.session_state.custom_stocks.pop(i); st.rerun()
+                c1.write(f"**{s['name']}** ({s['code']})")
+                if c2.button("📊 분석", key=f"port_an_{i}", use_container_width=True):
+                    st.session_state.active_item = s
+                    st.session_state.current_tab = "🔍 분석" # 탭 전환 설정
+                    add_to_history(s)
+                    st.rerun()
+                if c3.button("❌", key=f"port_del_{i}", use_container_width=True):
+                    st.session_state.custom_stocks.pop(i); st.rerun()
