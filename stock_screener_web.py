@@ -14,7 +14,7 @@ from modules.analyzer import StockAnalyzer
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
-# 🌟 CSS 누출 버그 완벽 차단 (태그 분리)
+# CSS 누출 방지 및 깔끔한 UI 스타일링
 st.markdown('<meta name="format-detection" content="telephone=no">', unsafe_allow_html=True)
 st.markdown("""
 <style>
@@ -103,8 +103,28 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     c4.markdown(draw_card("거래량", vol_txt, 0, ""), unsafe_allow_html=True)
 
     if len(data['dates']) >= 6:
-        st.write("#### 🕒 최근 5거래일 추이")
-        table_html = "<table class='custom-table'><tr><th>날짜</th><th>종가</th><th>변동</th><th>등락률</th><th>거래량</th></tr>"
+        st.write("#### 🕒 최근 5거래일 추이 (RSI & MACD 포함)")
+        
+        # 🌟 일자별 RSI 및 MACD 계산 (pandas 활용)
+        df_pr = pd.DataFrame({'Close': data['close_prices']})
+        
+        # MACD (12, 26) 계산
+        ema12 = df_pr['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = df_pr['Close'].ewm(span=26, adjust=False).mean()
+        df_pr['MACD'] = ema12 - ema26
+        
+        # RSI (14) 계산
+        delta_pr = df_pr['Close'].diff()
+        gain = delta_pr.where(delta_pr > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta_pr.where(delta_pr < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        rs = gain / loss
+        df_pr['RSI'] = 100 - (100 / (1 + rs))
+        
+        rsi_list = df_pr['RSI'].tolist()
+        macd_list = df_pr['MACD'].tolist()
+
+        # 테이블 헤더에 RSI, MACD 추가
+        table_html = "<table class='custom-table'><tr><th>날짜</th><th>종가</th><th>변동</th><th>등락률</th><th>거래량</th><th>RSI</th><th>MACD</th></tr>"
         
         for i in range(-2, -7, -1):
             p, po = data['close_prices'][i], data['close_prices'][i-1]
@@ -114,12 +134,30 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
             df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
             
+            # 일일 RSI 색상 처리 (70이상 빨강, 30이하 파랑)
+            d_rsi = rsi_list[i]
+            if pd.notna(d_rsi):
+                rsi_clr = "#f44336" if d_rsi >= 70 else ("#2196f3" if d_rsi <= 30 else "#424242")
+                rsi_str = f"<span style='color:{rsi_clr}; font-weight:bold;'>{d_rsi:.1f}</span>"
+            else:
+                rsi_str = "-"
+                
+            # 일일 MACD 색상 처리
+            d_macd = macd_list[i]
+            if pd.notna(d_macd):
+                macd_clr = "#f44336" if d_macd > 0 else ("#2196f3" if d_macd < 0 else "#424242")
+                macd_str = f"<span style='color:{macd_clr}; font-weight:bold;'>{d_macd:.2f}</span>"
+            else:
+                macd_str = "-"
+            
             table_html += f"<tr>"
             table_html += f"<td>{data['dates'][i][5:]}</td>"
             table_html += f"<td><b>{p_f}</b></td>"
             table_html += f"<td style='color:{clr}; font-weight:bold;'>{df_f}</td>"
             table_html += f"<td style='color:{clr}; font-weight:bold;'>{dc:+.2f}%</td>"
             table_html += f"<td>{int(data['volumes'][i]):,}</td>"
+            table_html += f"<td>{rsi_str}</td>"
+            table_html += f"<td>{macd_str}</td>"
             table_html += "</tr>"
             
         table_html += "</table>"
@@ -177,7 +215,6 @@ else:
         
         st.divider()
         
-        # 🌟 PC에서 너무 넓게 펴지는 것을 막고 적당한 길이로 중앙 정렬
         _, search_col, _ = st.columns([1, 2, 1])
         with search_col:
             query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
@@ -185,7 +222,7 @@ else:
                 cands = search_candidates(query)
                 
                 if cands.empty:
-                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다. ⚙️관리 탭에서 전체종목 CSV를 업로드 해주세요.")
+                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다. ⚙️관리 탭에서 CSV를 업로드하시거나 잠시 후 다시 시도해주세요.")
                 else:
                     options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
                     pick = st.selectbox("정확한 종목을 선택하세요", options)
@@ -227,7 +264,14 @@ else:
 
     with tab3:
         st.subheader("📥 데이터베이스 관리")
-        st.write("스트림릿 클라우드 환경에서는 한국거래소(KRX) 연결이 간헐적으로 차단될 수 있습니다. 종목 검색이 안 될 경우 직접 CSV 파일을 업로드해주세요.")
+        
+        # 🌟 KRX 다운로드 안내 및 직통 링크 추가
+        st.info("""
+        **💡 전체 종목 CSV 파일 다운로드 방법**
+        1. [KRX 정보데이터시스템 (여기 클릭)](http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201020101) 사이트에 접속합니다.
+        2. 화면 우측 상단의 **[CSV]** 버튼을 클릭하여 파일을 다운로드합니다.
+        3. 다운받은 파일을 아래 업로드 창에 끌어다 놓으시면 됩니다!
+        """)
         
         uploaded_file = st.file_uploader("전체 종목 리스트 CSV 업로드", type=['csv'])
         if uploaded_file is not None:
@@ -250,7 +294,7 @@ else:
         st.write("---")
         db_df = get_stock_db()
         csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📊 현재 적용 중인 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"krx_stock_list_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+        st.download_button("📊 현재 앱에 적용된 종목 리스트 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
         st.write("---")
         if st.button("🚪 로그아웃", type="primary"):
             st.session_state.pw_ok = False; st.rerun()
