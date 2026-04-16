@@ -1,206 +1,203 @@
 import streamlit as st
 import pandas as pd
-import json
+import hashlib
 import time
+import urllib.parse
+from datetime import datetime
+from deep_translator import GoogleTranslator
 import yfinance as yf
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import requests
+import xml.etree.ElementTree as ET
 
-from modules.data_fetcher import DataFetcher, search_candidates
+from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# --- [0. 서학개미사전 (수동 딕셔너리)] ---
-# 자주 찾는 해외 주식의 한글명을 영문 티커로 자동 변환합니다.
-US_STOCK_DICT = {
-    "애플": "AAPL", "테슬라": "TSLA", "엔비디아": "NVDA", 
-    "마이크로소프트": "MSFT", "구글": "GOOGL", "알파벳": "GOOGL",
-    "아마존": "AMZN", "메타": "META", "넷플릭스": "NFLX",
-    "노키아": "NOK", "아이렌": "IREN", "비티큐": "BTQ", "모빅스랩스": "MOBX"
-}
-
-# --- [1. DB 연결 및 데이터 관리] ---
-@st.cache_resource(ttl=300)
-def get_db_sheet():
-    try:
-        creds_info = dict(st.secrets["gcp_service_account"])
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
-        client = gspread.authorize(creds)
-        return client.open("StockScreener_DB").sheet1
-    except Exception as e:
-        st.error(f"❌ DB 연결 실패: {e}")
-        return None
-
-def load_user_favs(sheet, nickname, pin):
-    try:
-        records = sheet.get_all_records()
-        for row in records:
-            if str(row.get('Nickname')) == nickname:
-                if str(row.get('PIN')) == pin:
-                    return row.get('Favorites', "[]")
-                else: return "AUTH_FAIL"
-        return "NEW_USER"
-    except: return "[]"
-
-def save_user_favs(sheet, nickname, pin, favorites_list):
-    try:
-        fav_json = json.dumps(favorites_list, ensure_ascii=False)
-        records = sheet.get_all_records()
-        for idx, row in enumerate(records):
-            if str(row.get('Nickname')) == nickname:
-                sheet.update_cell(idx + 2, 3, fav_json)
-                return
-        sheet.append_row([nickname, pin, fav_json])
-    except: pass
-
-# --- [2. 앱 설정 및 스타일] ---
+# 🌟 최상단 설정
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
+# 모바일 취소선 방지 및 PC/모바일 통합 스타일
 st.markdown("""
-<style>
-    div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
-    .metric-card { background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
-    .metric-title { color: #616161; font-size: 1.0rem; font-weight: 600; margin-bottom: 8px; }
-    .metric-value { color: #212121; font-size: 1.8rem; font-weight: 800; }
-    .metric-delta.red { color: #f44336; font-size: 1.1rem; font-weight: bold; }
-    .metric-delta.blue { color: #2196f3; font-size: 1.1rem; font-weight: bold; }
-</style>
+   <meta name="format-detection" content="telephone=no">
+   <style>
+   div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
+    .stTable td { text-align: center !important; }
+    .stTable td { text-align: center !important; font-size: 0.9rem; }
+   .big-font { font-size:1.8rem !important; font-weight: bold; }
+   .red-text { color: #f44336; font-weight: bold; }
+   .blue-text { color: #2196f3; font-weight: bold; }
+   </style>
 """, unsafe_allow_html=True)
 
-# --- [3. 로그인 화면] ---
-if "login_info" not in st.session_state:
-    st.title("🚀 Stock Screener Pro")
-    st.info("나만의 관심종목을 안전하게 보관하려면 닉네임과 PIN번호를 입력하세요.")
-    _, col, _ = st.columns([1, 1, 1])
-    with col:
-        nick = st.text_input("닉네임 (ID)", placeholder="예: 스톡마스터")
-        pin = st.text_input("보안 PIN 번호 (숫자 4자리)", type="password")
-        if st.button("로그인 및 데이터 동기화", use_container_width=True, type="primary"):
-            sheet = get_db_sheet()
-            if sheet:
-                res = load_user_favs(sheet, nick, pin)
-                if res == "AUTH_FAIL": 
-                    st.error("PIN 번호가 틀렸습니다.")
-                else:
-                    st.session_state.login_info = {"nick": nick, "pin": pin}
-                    try:
-                        st.session_state.custom_stocks = json.loads(res) if res not in ["NEW_USER", "[]", ""] else []
-                    except: 
-                        st.session_state.custom_stocks = []
-                    st.rerun()
+CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
+
+@st.cache_data(ttl=3600)
+def get_exchange_rate():
+try:
+        rate = yf.Ticker("USDKRW=X").history(period="1d")
+        return float(rate['Close'].iloc[-1])
+        return float(yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1])
+except: return 1420.0
+
+@st.cache_data(ttl=3600)
+def get_company_news(company_name):
+try:
+url = f"https://news.google.com/rss/search?q={urllib.parse.quote(company_name+' 주식')}&hl=ko&gl=KR&ceid=KR:ko"
+response = requests.get(url, timeout=5)
+root = ET.fromstring(response.text)
+return [{"title": i.find('title').text, "link": i.find('link').text} for i in root.findall('.//item')[:5]]
+except: return []
+
+def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
+data = fetcher.get_stock_data(item['code'])
+if not data:
+st.error("⚠️ 데이터를 불러오지 못했습니다. 종목 코드나 네트워크를 확인해주세요.")
+return
+
+an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
+news = get_company_news(item['name'])
+
+st.subheader(f"📈 {item['name']} ({item['code']}) 리포트")
+
+curr, prev = data['current'], data['prev_close']
+diff = curr - prev
+chg = (diff / prev) * 100
+color_class = "red-text" if diff > 0 else ("blue-text" if diff < 0 else "")
+
+c1, c2, c3, c4 = st.columns(4)
+p_unit = "원" if curr > 1000 else "$"
+
+    # 숫자 안전 포맷팅
+curr_txt = f"{curr:,.2f}" if p_unit == "$" else f"{int(curr):,}"
+diff_txt = f"{diff:+,.2f}" if p_unit == "$" else f"{int(diff):+,}"
+conv_txt = f"{int(curr * exc_rate):,}"
+
+c1.markdown(f"현재가  \n<span class='big-font'>{curr_txt}{p_unit}</span>  \n<span class='{color_class}'>{diff_txt}{p_unit}</span>", unsafe_allow_html=True)
+c1.caption(f"약 {conv_txt}원")
+
+c2.markdown(f"등락률  \n<span class='big-font {color_class}'>{chg:+.2f}%</span>", unsafe_allow_html=True)
+
+    # 🌟 RSI 에러 방지 처리
+rsi_val = an.get('rsi')
+rsi_txt = f"{rsi_val:.1f}" if rsi_val is not None else "-"
+c3.markdown(f"RSI  \n<span class='big-font'>{rsi_txt}</span>", unsafe_allow_html=True)
+
+c4.markdown(f"거래량  \n<span class='big-font'>{int(data['volume']):,}</span>", unsafe_allow_html=True)
+
+if len(data['dates']) >= 6:
+st.write("#### 🕒 최근 5거래일 추이")
+rows = []
+for i in range(-2, -7, -1):
+p, po = data['close_prices'][i], data['close_prices'][i-1]
+df_val, dc = p-po, ((p-po)/po)*100
+clr = "red" if df_val > 0 else ("blue" if df_val < 0 else "black")
+            
+p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
+df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
+            rows.append([data['dates'][i][5:], p_f, f"<span style='color:{clr}'>{df_f}</span>", f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
+            
+            rows.append([data['dates'][i][5:], p_f, 
+                         f"<span style='color:{clr}'>{df_f}</span>",
+                         f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
+st.write(pd.DataFrame(rows, columns=["날짜", "종가", "변동", "등락률", "거래량"]).to_html(escape=False, index=False), unsafe_allow_html=True)
+
+st.divider()
+st.subheader("💡 분석 의견")
+st.markdown(f"### {an['recommendation_color']} {an['recommendation']}")
+for d in an['details']: st.success(d)
+
+st.divider()
+judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
+st.info(f"💡 [주달(Judal) 테마 확인]({judal_url})")
+for n in news: st.markdown(f"🔗 [{n['title']}]({n['link']})")
+
+if not any(s["code"] == item['code'] for s in st.session_state.get("custom_stocks", [])):
+if st.button("➕ 관심종목 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True):
+if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
+st.session_state.custom_stocks.append(item); st.rerun()
+
+# --- 메인 실행 로직 ---
+if "pw_ok" not in st.session_state: st.session_state.pw_ok = False
+if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
+if "search_history" not in st.session_state: st.session_state.search_history = []
+if "active_item" not in st.session_state: st.session_state.active_item = None
+if "port_code" not in st.session_state: st.session_state.port_code = None
+
+if not st.session_state.pw_ok:
+st.title("🚀 Stock Screener Pro")
+st.write("---")
+_, col, _ = st.columns([1, 1, 1])
+with col:
+st.subheader("🔒 로그인")
+pw = st.text_input("접속 비밀번호를 입력하세요", type="password")
+if st.button("들어가기", use_container_width=True, type="primary"):
+if hashlib.sha256(pw.encode()).hexdigest() == CORRECT_PASSWORD_HASH:
+st.session_state.pw_ok = True; st.rerun()
+else: st.error("비밀번호가 틀렸습니다.")
 else:
-    # --- [4. 메인 대시보드] ---
-    user = st.session_state.login_info
-    fetcher, analyzer = DataFetcher(), StockAnalyzer()
-    sheet = get_db_sheet()
-    
-    if "custom_stocks" not in st.session_state: 
-        st.session_state.custom_stocks = []
+fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
 
-    st.sidebar.write(f"👤 **{user['nick']}** 님 접속 중")
-    if st.sidebar.button("🚪 로그아웃"):
-        del st.session_state.login_info
-        st.rerun()
+if datetime.now().day == 13:
+st.info("📅 오늘은 매월 13일, 종목 리스트 업데이트 권장일입니다.")
 
-    tab1, tab2, tab3 = st.tabs(["🔍 종목 분석", "⭐ 내 관심종목", "⚙️ 관리"])
+tab1, tab2, tab3 = st.tabs(["🔍 종목 분석", "⭐ 관심종목", "⚙️ 관리"])
 
-    # --- 공통 리포트 함수 ---
-    def render_report(item, key_suffix):
-        with st.spinner("AI가 차트 및 기술적 지표를 분석 중입니다..."):
-            data = fetcher.get_stock_data(item['code'])
-            if not data:
-                st.error("⚠️ 야후 파이낸스에서 데이터를 불러오지 못했습니다. 티커가 정확한지 확인해 주세요.")
-                return
+with tab1:
+st.markdown("### 🕒 최근 검색")
+if st.session_state.search_history:
+cols = st.columns(5)
+for i, h in enumerate(st.session_state.search_history):
+if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
+st.session_state.active_item = h; st.rerun()
 
-            an_raw = analyzer.analyze(item['code'], item['name'], "기타", data)
-            an = an_raw if isinstance(an_raw, dict) else (json.loads(an_raw) if isinstance(an_raw, str) else {})
-
-            st.divider()
-            st.subheader(f"📊 {item['name']} ({item['code']}) 실시간 리포트")
-            
-            curr, prev = data['current'], data['prev_close']
-            diff, chg = curr - prev, ((curr - prev) / prev) * 100
-            p_unit = "$" if curr < 1000 else "원"
-            
-            rsi_raw = an.get('rsi')
-            try: rsi_display = f"{float(rsi_raw):.1f}"
-            except: rsi_display = str(rsi_raw) if rsi_raw else "계산불가"
-            
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                color = "red" if diff > 0 else "blue"
-                arrow = "▲" if diff > 0 else ("▼" if diff < 0 else "")
-                st.markdown(f"""<div class="metric-card"><div class="metric-title">현재가</div><div class="metric-value">{curr:,.2f}{p_unit}</div><div class="metric-delta {color}">{arrow} {abs(diff):,.2f}</div></div>""", unsafe_allow_html=True)
-            with c2:
-                st.markdown(f"""<div class="metric-card"><div class="metric-title">등락률</div><div class="metric-value">{chg:+.2f}%</div></div>""", unsafe_allow_html=True)
-            with c3:
-                st.markdown(f"""<div class="metric-card"><div class="metric-title">RSI (14일)</div><div class="metric-value">{rsi_display}</div></div>""", unsafe_allow_html=True)
-            with c4:
-                st.markdown(f"""<div class="metric-card"><div class="metric-title">거래량</div><div class="metric-value">{int(data['volume']):,}</div></div>""", unsafe_allow_html=True)
-
-            rec = an.get('recommendation') or an.get('opinion') or "AI 분석 엔진에서 응답을 받지 못했습니다."
-            st.info(f"💡 **AI 분석 의견:** {rec}")
-            
-            for detail in an.get('details', []):
-                st.write(f"- {detail}")
-
-            is_fav = any(s['code'] == item['code'] for s in st.session_state.custom_stocks)
-            if not is_fav:
-                if st.button("➕ 내 관심종목에 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True, type="primary"):
-                    st.session_state.custom_stocks.append(item)
-                    save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
-                    st.rerun()
-
-    # --- 탭 내용 ---
-    with tab1:
-        query = st.text_input("종목명/티커 입력", placeholder="예: 삼성전자, 애플, AAPL, NOK 등")
-        
-        if query:
-            clean_query = query.strip()
-            
-            # 💡 [서학개미사전 적용] 한글 입력 시 영어 티커로 자동 변환, 없으면 입력값 그대로 사용
-            search_target = US_STOCK_DICT.get(clean_query, clean_query)
-            
-            cands = search_candidates(search_target)
-            
+st.divider()
+query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 후보가 나타납니다.")
+if query:
+cands = search_candidates(query)
             if not cands.empty:
-                options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
-                
-                # 💡 [수동 검색 기능 1] 검색 결과가 있어도, 직접 입력한 티커로 강제 검색할 수 있는 옵션 추가
-                options.append(f"💡 직접 검색: '{search_target}' 티커로 강제 분석")
-                
-                pick = st.selectbox("종목 선택", options)
-                
-                if st.button("🚀 분석 시작", use_container_width=True, type="primary"):
-                    if pick.startswith("💡"):
-                        render_report({"code": search_target, "name": clean_query}, "search_direct")
-                    else:
-                        code = pick.split("(")[1].replace(")", "").strip()
-                        name = pick.split(" (")[0].strip()
-                        render_report({"code": code, "name": name}, "search")
+                pick = st.selectbox("정확한 종목 선택", [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()])
+            
+            if cands.empty:
+                st.warning(f"'{query}'에 대한 검색 결과가 없습니다. 거래소 서버 지연일 수 있으니 ⚙️관리 탭에서 CSV를 업로드하시거나 잠시 후 다시 시도해주세요.")
             else:
-                # 💡 [수동 검색 기능 2] DB에 결과가 아예 없을 때의 예외 처리
-                st.warning(f"내부 DB에서 '{clean_query}' 종목을 찾지 못했습니다.")
-                st.info(f"하지만 야후 파이낸스에 존재하는 티커라면 아래 버튼을 눌러 바로 데이터를 가져올 수 있습니다.")
-                
-                if st.button(f"🚀 '{search_target}' 티커로 직접 분석 시도", use_container_width=True, type="primary"):
-                    render_report({"code": search_target, "name": clean_query}, "search_fallback")
+                options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
+                pick = st.selectbox("정확한 종목 선택", options)
+if st.button("📊 즉시 분석", type="primary", use_container_width=True):
+code = pick.split("(")[1].replace(")", "")
+name = pick.split(" (")[0]
+item = {"code": code, "name": name, "sector": "기타"}
+st.session_state.active_item = item
+                    # 히스토리 업데이트
+st.session_state.search_history = [i for i in st.session_state.search_history if i['code'] != code]
+st.session_state.search_history.insert(0, item)
+st.session_state.search_history = st.session_state.search_history[:10]
+st.rerun()
 
-    with tab2:
-        if not st.session_state.custom_stocks: 
-            st.info("아직 저장된 관심종목이 없습니다.")
-        else:
-            for i, s in enumerate(st.session_state.custom_stocks):
-                c1, c2, c3 = st.columns([6, 2, 2])
-                c1.write(f"### **{s['name']}** ({s['code']})")
-                if c2.button("분석", key=f"fav_an_{i}", use_container_width=True): 
-                    render_report(s, f"fav_{i}")
-                if c3.button("삭제", key=f"fav_del_{i}", use_container_width=True):
-                    st.session_state.custom_stocks.pop(i)
-                    save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
-                    st.rerun()
-                st.divider()
+if st.session_state.active_item:
+st.divider(); render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, "tab1")
 
-    with tab3:
-        st.write(f"현재 계정: **{user['nick']}**")
-        st.success("✅ 구글 스프레드시트와 실시간 동기화가 완료되었습니다.")
+with tab2:
+if not st.session_state.custom_stocks: st.info("관심종목을 추가해 보세요.")
+else:
+if st.button("🗑️ 리스트 전체 삭제"): st.session_state.custom_stocks = []; st.rerun()
+for i, s in enumerate(st.session_state.custom_stocks):
+c1, c2, c3 = st.columns([5, 3, 2])
+c1.write(f"**{s['name']}** ({s['code']})")
+lbl = "🔼 닫기" if st.session_state.port_code == s['code'] else "📊 분석"
+if c2.button(lbl, key=f"p_an_{i}", use_container_width=True):
+st.session_state.port_code = None if st.session_state.port_code == s['code'] else s['code']; st.rerun()
+if c3.button("❌", key=f"p_del_{i}", use_container_width=True):
+st.session_state.custom_stocks.pop(i); st.rerun()
+if st.session_state.port_code == s['code']:
+render_report(fetcher, analyzer, exc_rate, s, f"tab2_{i}")
+st.divider()
+
+with tab3:
+st.subheader("📥 데이터베이스 관리")
+        st.write("서버 오류를 대비하여, 다운로드한 CSV 파일을 프로젝트 폴더에 `krx_stock_list.csv` 이름으로 저장해두면 오프라인 상태에서도 종목 검색이 가능합니다.")
+db_df = get_stock_db()
+csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📊 현재 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"stock_list_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+        st.download_button("📊 현재 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"krx_stock_list.csv", mime="text/csv")
+st.write("---")
+if st.button("🚪 로그아웃"):
+st.session_state.pw_ok = False; st.rerun()
