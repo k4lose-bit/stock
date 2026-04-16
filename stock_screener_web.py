@@ -28,6 +28,7 @@ div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
 .custom-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .custom-table th, .custom-table td { border-bottom: 1px solid #eeeeee; padding: 12px 8px; text-align: center; font-size: 0.95rem; }
 .custom-table th { background-color: #f8f9fa; color: #424242; font-weight: bold; }
+.guide-box { background-color: #f0f7ff; border-left: 5px solid #1E90FF; padding: 15px; border-radius: 5px; margin-top: 15px; font-size: 0.95rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,7 +100,7 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     c4.markdown(draw_card("거래량", vol_txt, 0, ""), unsafe_allow_html=True)
 
     if len(data['dates']) >= 6:
-        st.write("#### 🕒 최근 5거래일 추이 (RSI & MACD 포함)")
+        st.write("#### 🕒 최근 5거래일 추이 (매매 시그널 분석)")
         df_pr = pd.DataFrame({'Close': data['close_prices']})
         
         ema12 = df_pr['Close'].ewm(span=12, adjust=False).mean()
@@ -119,27 +120,53 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
         
         for i in range(-2, -7, -1):
             p, po = data['close_prices'][i], data['close_prices'][i-1]
+            v_curr, v_prev = data['volumes'][i], data['volumes'][i-1]
+            
             df_val, dc = p-po, ((p-po)/po)*100
             clr = "#f44336" if df_val > 0 else ("#2196f3" if df_val < 0 else "#616161")
             
             p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
             df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
             
+            # 🌟 거래량 시그널: 주가 상승 + 거래량 증가 시 강한 긍정
+            vol_str = f"{int(v_curr):,}"
+            if df_val > 0 and v_curr > v_prev:
+                vol_str = f"<span style='color:#f44336; font-weight:bold;'>{vol_str} 🟢</span>"
+            elif df_val < 0 and v_curr > v_prev:
+                vol_str = f"<span style='color:#2196f3; font-weight:bold;'>{vol_str} 🔴</span>"
+            else:
+                vol_str = f"<span>{vol_str}</span>"
+            
+            # 🌟 RSI 시그널: 30 이하 과매도(긍정), 70 이상 과매수(부정)
             d_rsi = rsi_list[i]
             if pd.notna(d_rsi):
-                rsi_clr = "#f44336" if d_rsi >= 70 else ("#2196f3" if d_rsi <= 30 else "#424242")
-                rsi_str = f"<span style='color:{rsi_clr}; font-weight:bold;'>{d_rsi:.1f}</span>"
+                if d_rsi <= 30: rsi_str = f"<span style='color:#2196f3; font-weight:bold;'>{d_rsi:.1f} 🟢</span>"
+                elif d_rsi >= 70: rsi_str = f"<span style='color:#f44336; font-weight:bold;'>{d_rsi:.1f} 🔴</span>"
+                else: rsi_str = f"<span style='color:#424242;'>{d_rsi:.1f}</span>"
             else: rsi_str = "-"
                 
+            # 🌟 MACD 시그널: 0 이상 상승추세(긍정), 0 이하 하락추세(부정)
             d_macd = macd_list[i]
             if pd.notna(d_macd):
-                macd_clr = "#f44336" if d_macd > 0 else ("#2196f3" if d_macd < 0 else "#424242")
-                macd_str = f"<span style='color:{macd_clr}; font-weight:bold;'>{d_macd:.2f}</span>"
+                if d_macd > 0: macd_str = f"<span style='color:#f44336; font-weight:bold;'>{d_macd:.2f} 🟢</span>"
+                else: macd_str = f"<span style='color:#2196f3; font-weight:bold;'>{d_macd:.2f} 🔴</span>"
             else: macd_str = "-"
             
-            table_html += f"<tr><td>{data['dates'][i][5:]}</td><td><b>{p_f}</b></td><td style='color:{clr}; font-weight:bold;'>{df_f}</td><td style='color:{clr}; font-weight:bold;'>{dc:+.2f}%</td><td>{int(data['volumes'][i]):,}</td><td>{rsi_str}</td><td>{macd_str}</td></tr>"
+            table_html += f"<tr><td>{data['dates'][i][5:]}</td><td><b>{p_f}</b></td><td style='color:{clr}; font-weight:bold;'>{df_f}</td><td style='color:{clr}; font-weight:bold;'>{dc:+.2f}%</td><td>{vol_str}</td><td>{rsi_str}</td><td>{macd_str}</td></tr>"
         table_html += "</table>"
         st.markdown(table_html, unsafe_allow_html=True)
+        
+        # 🌟 투자 고려를 위한 시그널 가이드 추가
+        st.markdown("""
+        <div class="guide-box">
+            <b>💡 기술적 지표 매매 시그널 가이드</b><br>
+            위 표의 🟢 기호는 매수를 고려해 볼 만한 <b>긍정적(Bullish) 신호</b>를 의미합니다.<br><br>
+            • <b>거래량:</b> 주가가 상승하면서 전일 대비 거래량이 증가하면 강한 매수세(🟢)로 해석합니다.<br>
+            • <b>RSI:</b> 30 이하로 떨어지면 주가가 과하게 빠진 '과매도' 상태로 반등 가능성(🟢)이 높습니다. (70 이상은 단기고점 🔴)<br>
+            • <b>MACD:</b> 0선 위(양수)에 머물고 있으면 전반적인 상승 추세(🟢)가 유지되고 있음을 의미합니다.<br><br>
+            ※ 세 가지 지표에 모두 🟢 신호가 켜졌다면 단기적으로 매우 좋은 매수 타이밍일 확률이 높습니다!
+        </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
     st.subheader("💡 종합 분석 의견")
@@ -199,7 +226,7 @@ else:
             if query:
                 cands = search_candidates(query)
                 if cands.empty:
-                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다. 잠시 후 다시 시도해주세요.")
+                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다.")
                 else:
                     options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
                     pick = st.selectbox("정확한 종목을 선택하세요", options)
