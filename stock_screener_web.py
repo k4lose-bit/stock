@@ -9,7 +9,6 @@ import yfinance as yf
 import requests
 import xml.etree.ElementTree as ET
 
-# 💡 구글 시트 연동 라이브러리
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -17,7 +16,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# --- [🌟 구글 시트 다중 사용자 동기화 함수 시작] ---
 @st.cache_resource(ttl=300)
 def get_db_sheet():
     try:
@@ -37,8 +35,8 @@ def load_user_favs(sheet, nickname, pin):
                 if str(row.get('PIN', '')) == pin:
                     return json.loads(row.get('Favorites', "[]"))
                 else: 
-                    return "AUTH_FAIL" # 비밀번호 틀림
-        return "NEW_USER" # 새로운 닉네임
+                    return "AUTH_FAIL" 
+        return "NEW_USER" 
     except: return []
 
 def save_user_favs(sheet, nickname, pin, fav_list):
@@ -46,7 +44,6 @@ def save_user_favs(sheet, nickname, pin, fav_list):
         fav_json = json.dumps(fav_list, ensure_ascii=False)
         records = sheet.get_all_records()
         
-        # 시트가 아예 비어있으면 헤더부터 생성
         if not records:
             sheet.append_row(['Nickname', 'PIN', 'Favorites'])
             sheet.append_row([nickname, pin, fav_json])
@@ -57,10 +54,8 @@ def save_user_favs(sheet, nickname, pin, fav_list):
                 sheet.update_cell(idx + 2, 3, fav_json)
                 return
                 
-        # 기존에 없던 닉네임이면 새 줄에 추가
         sheet.append_row([nickname, pin, fav_json])
     except: pass
-# --- [🌟 구글 시트 동기화 함수 끝] ---
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
@@ -215,8 +210,10 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
 
     st.divider()
     st.subheader("💡 종합 분석 의견")
-    st.markdown(f"### {an['recommendation_color']} {an['recommendation']}")
-    for d in an['details']: st.success(d)
+    
+    # 🌟 이 부분이 문제의 원인이었습니다. 엔진에서 색상 데이터를 안 보내주더라도 에러 없이 띄우도록 .get()으로 방어했습니다.
+    st.markdown(f"### {an.get('recommendation_color', '')} {an.get('recommendation', '분석 결과를 불러올 수 없습니다.')}")
+    for d in an.get('details', []): st.success(d)
     
     st.divider()
     
@@ -232,20 +229,17 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
             st.session_state.custom_stocks.append(item)
             
-            # 💡 [연동 포인트] 내 닉네임과 PIN으로 구글 시트에 즉시 업로드
             sheet = get_db_sheet()
             user = st.session_state.login_info
             if sheet: save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
             
             st.rerun()
 
-# --- 메인 실행 로직 ---
 if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
 if "search_history" not in st.session_state: st.session_state.search_history = []
 if "active_item" not in st.session_state: st.session_state.active_item = None
 if "port_code" not in st.session_state: st.session_state.port_code = None
 
-# 🌟 닉네임 + PIN 기반 로그인 시스템
 if "login_info" not in st.session_state:
     st.title("🚀 Stock Screener Pro")
     st.write("---")
@@ -271,7 +265,6 @@ if "login_info" not in st.session_state:
                 else:
                     st.error("구글 시트 데이터베이스에 연결할 수 없습니다. (Secrets 키 확인 필요)")
                     
-    # 🌟 책임 회피용 문구 하단에 크게 삽입
     st.markdown("<div class='disclaimer'>⚠️ <b>본 정보는 투자 참고용이며 책임지지 않습니다.</b> 제공되는 분석 지표와 의견은 시스템 알고리즘에 의한 것이며, 최종 투자 판단은 전적으로 사용자 본인에게 있습니다.</div>", unsafe_allow_html=True)
 
 else:
@@ -332,8 +325,6 @@ else:
             with col2:
                 if st.button("🗑️ 전체 삭제", use_container_width=True): 
                     st.session_state.custom_stocks = []
-                    
-                    # 💡 전체 삭제 후 즉시 시트 반영
                     sheet = get_db_sheet()
                     if sheet: save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
                     st.rerun()
@@ -347,8 +338,6 @@ else:
                     st.rerun()
                 if c3.button("❌", key=f"p_del_{i}", use_container_width=True):
                     st.session_state.custom_stocks.pop(i)
-                    
-                    # 💡 개별 삭제 후 즉시 시트 반영
                     sheet = get_db_sheet()
                     if sheet: save_user_favs(sheet, user['nick'], user['pin'], st.session_state.custom_stocks)
                     st.rerun()
