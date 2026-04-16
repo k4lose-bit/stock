@@ -3,20 +3,43 @@ import pandas as pd
 import hashlib
 import time
 import yfinance as yf
+import urllib.parse
+import requests
+import xml.etree.ElementTree as ET
 
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
 CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
 
-# 🌟 새롭게 추가된 기능: 실시간 원/달러 환율 가져오기
 @st.cache_data(ttl=3600)
 def get_exchange_rate():
     try:
         rate = yf.Ticker("USDKRW=X").history(period="1d")
         return float(rate['Close'].iloc[-1])
     except Exception:
-        return 1400.0 # 가져오기 실패 시 기본값
+        return 1400.0
+
+# 🌟 수정된 뉴스 가져오기 함수 (최근 7일 조건 추가)
+@st.cache_data(ttl=3600)
+def get_company_news(company_name, limit=5):
+    try:
+        # 검색어 뒤에 ' when:7d'를 붙여 일주일 이내 기사만 필터링합니다.
+        search_query = urllib.parse.quote(f"{company_name} 주식 when:7d")
+        url = f"https://news.google.com/rss/search?q={search_query}&hl=ko&gl=KR&ceid=KR:ko"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=5)
+        root = ET.fromstring(response.text)
+        
+        news_list = []
+        for item in root.findall('.//item')[:limit]:
+            title = item.find('title').text
+            link = item.find('link').text
+            news_list.append({"title": title, "link": link})
+        return news_list
+    except Exception as e:
+        print(f"[ERROR] 뉴스 가져오기 실패: {e}")
+        return []
 
 def check_password():
     if "password_correct" not in st.session_state:
@@ -46,7 +69,7 @@ if "offline_price_data" not in st.session_state:
 if check_password():
     fetcher = DataFetcher()
     analyzer = StockAnalyzer()
-    exc_rate = get_exchange_rate() # 환율 정보 로드
+    exc_rate = get_exchange_rate()
 
     with st.sidebar:
         st.success("✅ 로그인 성공!")
@@ -104,7 +127,6 @@ if check_password():
                                 st.divider()
                                 m1, m2, m3, m4 = st.columns(4)
                                 
-                                # 환율 적용 로직
                                 krw_price = f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f} (약 {int(an['current'] * exc_rate):,}원)"
                                 m1.metric("현재가", krw_price)
                                 m2.metric("등락율", f"{an['change']:.2f}%")
@@ -186,9 +208,9 @@ if check_password():
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
                 if st.button("📊 상세 분석 시작", type="primary"):
-                    with st.spinner(f"{name} 데이터를 분석하고 최신 뉴스를 가져오는 중..."):
+                    with st.spinner(f"{name} 데이터를 분석하고 최근 7일 뉴스를 가져오는 중..."):
                         data = fetcher.get_stock_data(code)
-                        news_list = fetcher.get_company_news(name)
+                        news_list = get_company_news(name)
                         
                         if data:
                             an = analyzer.analyze(code, name, sector, data)
@@ -196,7 +218,6 @@ if check_password():
                                 st.header(f"📈 {name} 상세 분석 리포트")
                                 c1, c2, c3, c4 = st.columns(4)
                                 
-                                # 환율 적용 로직 (상세 분석)
                                 krw_price = f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f} (약 {int(an['current'] * exc_rate):,}원)"
                                 
                                 c1.metric("현재가", krw_price)
@@ -213,12 +234,12 @@ if check_password():
                                 
                                 st.divider()
 
-                                st.subheader(f"📰 '{name}' 관련 최신 뉴스")
+                                st.subheader(f"📰 '{name}' 최근 1주일 주요 뉴스")
                                 if news_list:
                                     for news in news_list:
                                         st.markdown(f"🔗 [{news['title']}]({news['link']})")
                                 else:
-                                    st.write("관련 뉴스를 불러오지 못했거나 최근 이슈가 없습니다.")
+                                    st.write("최근 일주일 이내에 등록된 주요 뉴스가 없습니다.")
                         else:
                             st.error("데이터를 가져올 수 없습니다. 종목 코드나 네트워크 상태를 확인해주세요.")
 else:
