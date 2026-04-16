@@ -66,7 +66,7 @@ def draw_card(title, value_str, diff_val, diff_str, caption=""):
 def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     data = fetcher.get_stock_data(item['code'])
     if not data:
-        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드나 네트워크를 확인해주세요.")
+        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드(티커)나 네트워크를 확인해주세요.")
         return
 
     an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
@@ -221,7 +221,6 @@ else:
         
         _, search_col, _ = st.columns([1, 2, 1])
         with search_col:
-            # 🌟 검색어 안내 문구를 친절하게 변경했습니다.
             query = st.text_input("종목명 입력 (한국주식, 또는 애플/테슬라/엔비디아 등)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
             if query:
                 cands = search_candidates(query)
@@ -267,51 +266,18 @@ else:
                     st.divider()
 
     with tab3:
+        # 🌟 관리자 탭 정리: 파일 업로드 기능 제거 & 다운로드 버튼 유지
         st.subheader("📥 데이터베이스 관리")
         st.info("""
         **💡 관리자 전용 DB 갱신 안내**
-        보안 및 안정성을 위해 종목 데이터베이스 갱신은 앱 외부(서버/깃허브)에서 진행됩니다.
-        1. [KRX 정보데이터시스템](http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201020101) 접속 > [기본통계] > [주식] > [종목정보] > [전종목 기본정보]
-        2. 우측 상단의 [⬇️ 다운로드] 버튼을 눌러 **CSV 파일**을 다운받습니다.
-        3. 아래 파일 업로드 창에 넣어주시면 실시간으로 시스템에 반영됩니다.
+        종목 데이터베이스 갱신은 보안을 위해 앱 외부(GitHub 또는 스트림릿 클라우드 파일 관리자)에서 직접 `krx_stock_list.csv` 파일을 덮어씌우는 방식으로 진행됩니다.
         """)
         
-        uploaded_file = st.file_uploader("전체 종목 리스트 CSV 업로드", type=['csv'])
-        if uploaded_file is not None:
-            try:
-                try:
-                    df = pd.read_csv(uploaded_file, encoding='utf-8', dtype=str)
-                except UnicodeDecodeError:
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, encoding='cp949', dtype=str)
-                
-                df.columns = df.columns.str.replace(" ", "")
-                col_map = {}
-                for c in df.columns:
-                    if c in ['단축코드', '종목코드', '코드', 'CODE']: col_map[c] = '종목코드'
-                    elif c in ['한글종목약명', '종목명', '회사명', 'NAME']: col_map[c] = '회사명'
-                    elif c in ['시장구분', '업종명', '섹터', 'SECTOR']: col_map[c] = '섹터'
-                    
-                if '회사명' not in col_map.values():
-                    for c in df.columns:
-                        if c == '한글종목명': col_map[c] = '회사명'
-                        
-                df = df.rename(columns=col_map)
-                df = df.loc[:, ~df.columns.duplicated()]
-                
-                df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
-                df['회사명'] = df['회사명'].astype(str).str.strip()
-                if '섹터' not in df.columns: df['섹터'] = '기타'
-                
-                st.session_state.uploaded_db = df[['종목코드', '회사명', '섹터']].dropna()
-                st.success(f"✅ {len(st.session_state.uploaded_db)}개의 종목 데이터가 성공적으로 반영되었습니다! (이제 검색이 잘 될 것입니다)")
-            except Exception as e:
-                st.error(f"오류가 발생했습니다: {e}")
-
         st.write("---")
         db_df = get_stock_db()
         csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button("📊 현재 앱에 적용된 종목 리스트 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list_active.csv", mime="text/csv")
+        
         st.write("---")
         if st.button("🚪 로그아웃", type="primary"):
             st.session_state.pw_ok = False; st.rerun()
