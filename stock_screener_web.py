@@ -37,7 +37,6 @@ def get_company_news(company_name, limit=5):
             news_list.append({"title": title, "link": link})
         return news_list
     except Exception as e:
-        print(f"[ERROR] 뉴스 가져오기 실패: {e}")
         return []
 
 @st.cache_data(ttl=3600*24)
@@ -101,7 +100,7 @@ def check_password():
     return True
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
-st.title("🚀 Stock Screener Pro (상세분석 + 한글 번역 📰)")
+st.title("🚀 Stock Screener Pro (풀옵션 스크리너 📊)")
 
 if "custom_stocks" not in st.session_state:
     st.session_state.custom_stocks = []
@@ -120,9 +119,11 @@ if check_password():
             st.rerun()
 
         st.header("⚙️ 필터 설정")
+        # 🌟 새로운 지표들이 필터에 추가되었습니다
         available_filters = [
             "RSI 과매도 (30 이하)", "RSI 과매수 (70 이상)",
             "MACD 골든크로스", "MACD 데드크로스",
+            "볼린저 밴드 하단 터치", "20일선 상향 돌파",
             "거래량 급증"
         ]
         selected_filters = st.multiselect(
@@ -209,18 +210,18 @@ if check_password():
                             pass_all = True
                             match_signals = []
                             
-                            if "RSI 과매도 (30 이하)" in selected_filters:
-                                if an['rsi'] > 30: pass_all = False
-                                else: match_signals.append("RSI 과매도")
-                            if "MACD 골든크로스" in selected_filters:
-                                if an['macd_cross'] != "골든크로스": pass_all = False
-                                else: match_signals.append("MACD 골든크로스")
+                            # 필터 검사
+                            for f in selected_filters:
+                                if f == "RSI 과매도 (30 이하)" and an['rsi'] <= 30: match_signals.append("RSI 과매도")
+                                elif f == "MACD 골든크로스" and an['macd_cross'] == "골든크로스": match_signals.append("MACD 골든크로스")
+                                elif f in an['signals']: match_signals.append(f)
+                                else: pass_all = False
                                 
                             if pass_all and (selected_filters == [] or match_signals):
                                 krw_price = f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f} ({int(an['current'] * exc_rate):,}원)"
                                 results.append({
                                     "종목명": name, "현재가": krw_price,
-                                    "등락율": f"{an['change']:.2f}%", "RSI": f"{an['rsi']:.1f}",
+                                    "RSI": f"{an['rsi']:.1f}",
                                     "신호": " | ".join(match_signals) if match_signals else "-"
                                 })
                     progress.progress((i + 1) / total)
@@ -250,7 +251,7 @@ if check_password():
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
                 if st.button("📊 상세 분석 시작", type="primary"):
-                    with st.spinner(f"{name} 기업 한글 번역 및 데이터를 가져오는 중... (약 5초 소요)"):
+                    with st.spinner(f"{name} 데이터를 분석 중입니다..."):
                         data = fetcher.get_stock_data(code)
                         news_list = get_company_news(name)
                         profile = get_company_profile(code)
@@ -270,37 +271,37 @@ if check_password():
                                 
                                 st.divider()
                                 
-                                st.subheader("🏢 기업 개요 및 펀더멘탈 (한글 번역)")
+                                st.subheader("🏢 기업 개요 및 펀더멘탈")
                                 if profile:
                                     st.markdown(f"**섹터:** {profile['sector']} &nbsp;|&nbsp; **산업군:** {profile['industry']}")
                                     if profile['website']:
                                         st.markdown(f"**웹사이트:** [{profile['website']}]({profile['website']})")
                                     
                                     st.markdown("**📊 주요 재무/시장 지표**")
+                                    # 🌟 N/A 거슬림 해결: 야후 파이낸스 미제공 시 깔끔하게 '-'로 출력되도록 수정
                                     f1, f2, f3, f4, f5 = st.columns(5)
                                     
                                     mc = profile.get('marketCap', 0)
-                                    if mc > 0:
-                                        if code.isdigit():
-                                            mc_str = f"{mc // 100000000:,}억 원"
-                                        else:
-                                            mc_str = f"${mc // 1000000:,}M"
+                                    if mc and mc > 0:
+                                        mc_str = f"{mc // 100000000:,}억 원" if code.isdigit() else f"${mc // 1000000:,}M"
                                     else:
-                                        mc_str = "N/A"
+                                        mc_str = "-"
                                         
                                     f1.metric("시가총액", mc_str)
-                                    f2.metric("PER", f"{profile['pe']:.2f}" if profile['pe'] else "N/A")
-                                    f3.metric("EPS", f"{profile['eps']:.2f}" if profile['eps'] else "N/A")
+                                    f2.metric("PER", f"{profile['pe']:.2f}" if profile.get('pe') else "-")
+                                    f3.metric("EPS", f"{profile['eps']:.2f}" if profile.get('eps') else "-")
                                     
-                                    dy = profile['div_yield']
-                                    f4.metric("배당수익률", f"{dy*100:.2f}%" if dy else "N/A")
+                                    dy = profile.get('div_yield')
+                                    f4.metric("배당수익률", f"{dy*100:.2f}%" if dy else "-")
                                     
-                                    h52 = profile['high52']
-                                    l52 = profile['low52']
+                                    h52, l52 = profile.get('high52'), profile.get('low52')
                                     if h52 and l52:
                                         f5.metric("52주 고/저", f"{l52:.1f} ~ {h52:.1f}")
                                     else:
-                                        f5.metric("52주 고/저", "N/A")
+                                        f5.metric("52주 고/저", "-")
+                                        
+                                    # 한국 주식 데이터 부재에 대한 안내 캡션 추가
+                                    st.caption("※ 정보가 '-'로 표시되는 항목은 야후 파이낸스에서 해당 종목의 재무 데이터를 제공하지 않는 경우입니다.")
 
                                     st.info(profile['summary'])
                                 else:
@@ -315,7 +316,6 @@ if check_password():
                                 
                                 st.divider()
 
-                                # 🌟 새롭게 추가된 주달(Judal) 연동 버튼
                                 st.subheader(f"📰 '{name}' 주요 이슈 및 투자분석")
                                 judal_search_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(name)}+투자분석"
                                 st.info(f"💡 **AI 테마 및 추가 분석 확인하기:** [👉 주달(Judal)에서 '{name}' 분석 결과 보기]({judal_search_url})")
