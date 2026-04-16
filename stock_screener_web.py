@@ -9,6 +9,15 @@ from oauth2client.service_account import ServiceAccountCredentials
 from modules.data_fetcher import DataFetcher, search_candidates
 from modules.analyzer import StockAnalyzer
 
+# --- [0. 서학개미사전 (수동 딕셔너리)] ---
+# 자주 찾는 해외 주식의 한글명을 영문 티커로 자동 변환합니다.
+US_STOCK_DICT = {
+    "애플": "AAPL", "테슬라": "TSLA", "엔비디아": "NVDA", 
+    "마이크로소프트": "MSFT", "구글": "GOOGL", "알파벳": "GOOGL",
+    "아마존": "AMZN", "메타": "META", "넷플릭스": "NFLX",
+    "노키아": "NOK", "아이렌": "IREN", "비티큐": "BTQ", "모빅스랩스": "MOBX"
+}
+
 # --- [1. DB 연결 및 데이터 관리] ---
 @st.cache_resource(ttl=300)
 def get_db_sheet():
@@ -100,19 +109,11 @@ else:
         with st.spinner("AI가 차트 및 기술적 지표를 분석 중입니다..."):
             data = fetcher.get_stock_data(item['code'])
             if not data:
-                st.error("⚠️ 야후 파이낸스(Yahoo Finance)에서 데이터를 불러오지 못했습니다. 잠시 후 다시 시도하거나 다른 종목을 검색해 보세요.")
+                st.error("⚠️ 야후 파이낸스에서 데이터를 불러오지 못했습니다. 티커가 정확한지 확인해 주세요.")
                 return
 
             an_raw = analyzer.analyze(item['code'], item['name'], "기타", data)
-            
-            an = {}
-            if isinstance(an_raw, dict):
-                an = an_raw
-            elif isinstance(an_raw, str):
-                try:
-                    an = json.loads(an_raw)
-                except:
-                    an = {"recommendation": an_raw, "details": []}
+            an = an_raw if isinstance(an_raw, dict) else (json.loads(an_raw) if isinstance(an_raw, str) else {})
 
             st.divider()
             st.subheader(f"📊 {item['name']} ({item['code']}) 실시간 리포트")
@@ -122,10 +123,8 @@ else:
             p_unit = "$" if curr < 1000 else "원"
             
             rsi_raw = an.get('rsi')
-            try:
-                rsi_display = f"{float(rsi_raw):.1f}"
-            except:
-                rsi_display = str(rsi_raw) if rsi_raw else "계산불가"
+            try: rsi_display = f"{float(rsi_raw):.1f}"
+            except: rsi_display = str(rsi_raw) if rsi_raw else "계산불가"
             
             c1, c2, c3, c4 = st.columns(4)
             with c1:
@@ -154,17 +153,38 @@ else:
 
     # --- 탭 내용 ---
     with tab1:
-        query = st.text_input("종목명/티커 입력", placeholder="예: 휴림로봇, 삼성전자, AAPL 등")
+        query = st.text_input("종목명/티커 입력", placeholder="예: 삼성전자, 애플, AAPL, NOK 등")
+        
         if query:
-            cands = search_candidates(query)
+            clean_query = query.strip()
+            
+            # 💡 [서학개미사전 적용] 한글 입력 시 영어 티커로 자동 변환, 없으면 입력값 그대로 사용
+            search_target = US_STOCK_DICT.get(clean_query, clean_query)
+            
+            cands = search_candidates(search_target)
+            
             if not cands.empty:
                 options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
+                
+                # 💡 [수동 검색 기능 1] 검색 결과가 있어도, 직접 입력한 티커로 강제 검색할 수 있는 옵션 추가
+                options.append(f"💡 직접 검색: '{search_target}' 티커로 강제 분석")
+                
                 pick = st.selectbox("종목 선택", options)
-                # 🌟 버튼을 다시 예쁜 빨간색(primary)으로 복구하고 공백 제거 추가!
+                
                 if st.button("🚀 분석 시작", use_container_width=True, type="primary"):
-                    code = pick.split("(")[1].replace(")", "").strip()
-                    name = pick.split(" (")[0].strip()
-                    render_report({"code": code, "name": name}, "search")
+                    if pick.startswith("💡"):
+                        render_report({"code": search_target, "name": clean_query}, "search_direct")
+                    else:
+                        code = pick.split("(")[1].replace(")", "").strip()
+                        name = pick.split(" (")[0].strip()
+                        render_report({"code": code, "name": name}, "search")
+            else:
+                # 💡 [수동 검색 기능 2] DB에 결과가 아예 없을 때의 예외 처리
+                st.warning(f"내부 DB에서 '{clean_query}' 종목을 찾지 못했습니다.")
+                st.info(f"하지만 야후 파이낸스에 존재하는 티커라면 아래 버튼을 눌러 바로 데이터를 가져올 수 있습니다.")
+                
+                if st.button(f"🚀 '{search_target}' 티커로 직접 분석 시도", use_container_width=True, type="primary"):
+                    render_report({"code": search_target, "name": clean_query}, "search_fallback")
 
     with tab2:
         if not st.session_state.custom_stocks: 
