@@ -127,13 +127,14 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
         if len(dates) >= 20: 
             for c in [c1, c2, c3, c4]: c.markdown("<hr style='margin: 5px 0;'>", unsafe_allow_html=True)
             
-            # 과거 5일 추이 (오류 수정 패치 적용)
+            # 과거 5일 추이 리스트업
             for i in range(-2, -7, -1):
+                if abs(i) > len(dates): break
                 d_short = dates[i][5:]
                 p_past = prices[i]
                 diff = curr - p_past
                 
-                # 🌟 에러가 났던 숫자 포맷팅 부분을 안전하게 수정했습니다.
+                # 금액 차이 표시
                 if curr > 1000:
                     diff_str = f"({int(diff):+,}원)"
                     p_str = f"{int(p_past):,}원"
@@ -144,13 +145,17 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
                 diff_color = "#e53935" if diff > 0 else ("#1e88e5" if diff < 0 else "#666")
                 c1.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | {p_str} <span style='color:{diff_color}; font-weight:bold;'>{diff_str}</span></div>", unsafe_allow_html=True)
                 
+                # 일별 등락률 (전일 대비)
                 chg = ((prices[i] - prices[i-1]) / prices[i-1]) * 100
                 chg_color = "#e53935" if chg > 0 else ("#1e88e5" if chg < 0 else "#666")
                 c2.markdown(f"<div style='font-size:0.8rem; color:{chg_color};'>{d_short} | <b>{chg:+.2f}%</b></div>", unsafe_allow_html=True)
                 
+                # 일별 RSI (🌟 에러가 났던 수치 포맷팅 방어 강화)
                 rsi_val = analyzer.indicator.calculate_rsi(prices[:i+1])
-                c3.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{rsi_val:.1f if rsi_val else '-'}</b></div>", unsafe_allow_html=True)
+                rsi_display = f"{rsi_val:.1f}" if rsi_val is not None else "-"
+                c3.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{rsi_display}</b></div>", unsafe_allow_html=True)
                 
+                # 일별 거래량
                 c4.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{int(volumes[i]):,}</b></div>", unsafe_allow_html=True)
 
         st.divider()
@@ -212,10 +217,11 @@ if check_password():
         if query:
             cands = search_candidates(query, limit=10)
             if not cands.empty:
-                opts = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
+                opts = [f"{row['회사명']} ({row['종목코드']})" for _, row in cands.iterrows()]
                 pick = st.selectbox("종목 선택", opts)
                 idx = opts.index(pick)
-                code = str(cands.iloc[idx]["종목코드"]).zfill(6) if str(cands.iloc[idx]["종목코드"]).isdigit() else str(cands.iloc[idx]["종목코드"])
+                code = str(cands.iloc[idx]["종목코드"])
+                if code.isdigit(): code = code.zfill(6)
                 name, sector = str(cands.iloc[idx]["회사명"]), str(cands.iloc[idx].get("섹터", "기타"))
                 if st.button("📊 분석 시작", type="primary", use_container_width=True):
                     st.session_state.active_analysis = {"code": code, "name": name, "sector": sector}
