@@ -1,7 +1,9 @@
 <div style="border: 1px solid #d3d3d3; padding: 15px; border-radius: 5px; font-family: monospace; line-height: 1.5; background-color: transparent; white-space: pre; overflow-x: auto;">
+import streamlit as st
+import pandas as pd
+import hashlib
+import time
 
-방금 우리가 만든 3명의 직원(모듈)을 불러옵니다!
-</div>
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates, parse_ohlcv_csv
 from modules.analyzer import StockAnalyzer
 
@@ -24,7 +26,7 @@ if not st.session_state["password_correct"]:
     return False
 return True
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
-st.title("🚀 Stock Screener Pro (모듈화 속도개선 버전 ⚡)")
+st.title("🚀 Stock Screener Pro (CSV 없는 자동화 버전 ⚡)")
 
 if "custom_stocks" not in st.session_state:
 st.session_state.custom_stocks = []
@@ -32,7 +34,6 @@ if "offline_price_data" not in st.session_state:
 st.session_state.offline_price_data = {}
 
 if check_password():
-# 직원 2명을 출근시킵니다
 fetcher = DataFetcher()
 analyzer = StockAnalyzer()
 
@@ -60,22 +61,13 @@ with st.sidebar:
     if "Volume Surge" in selected_filters:
         params["vol_ratio"] = st.number_input("거래량 배수 (평균 대비)", 1.0, 10.0, 2.0)
 
-    st.divider()
-    st.subheader("📌 종목 DB 세팅(중요)")
-    stock_db_file = st.file_uploader("📎 종목 리스트 CSV 업로드", type=["csv"], key="stock_db_uploader")
-    if stock_db_file is not None:
-        try:
-            st.session_state.uploaded_stock_db = pd.read_csv(stock_db_file)
-            st.success("✅ 종목 DB 업로드 완료!")
-        except Exception as e:
-            st.error("❌ 파싱 실패")
+    # CSV 업로드 창은 삭제했습니다!
 
 tab1, tab2, tab3 = st.tabs(["✏️ 내 종목 추가", "⭐ 관심종목 스크리닝", "🔍 개별 종목 분석"])
 
-# --- 탭 1: 종목 추가 ---
 with tab1:
     st.info("기업명을 검색해 관심종목에 추가합니다.")
-    query = st.text_input("🔍 기업명 입력", placeholder="예: 휴림로봇", key="add_query")
+    query = st.text_input("🔍 기업명 입력", placeholder="예: 삼성전자", key="add_query")
     if query:
         cands = search_candidates(query, limit=20)
         if cands.empty:
@@ -114,10 +106,9 @@ with tab1:
 
     st.divider()
     db = get_stock_db()
-    st.caption(f"현재 로드된 종목 수: {len(db):,}개")
+    st.caption(f"현재 인식된 기본 종목 수: {len(db):,}개")
     st.dataframe(db.head(30), use_container_width=True)
 
-# --- 탭 2: 일괄 스크리닝 ---
 with tab2:
     if not st.session_state.custom_stocks:
         st.warning("관심종목이 없습니다. '내 종목 추가'에서 먼저 추가하세요.")
@@ -154,7 +145,6 @@ with tab2:
                             if an['macd_cross'] != "골든크로스": pass_all = False
                             else: match_signals.append("MACD 골든크로스")
                             
-                        # 필터 통과 시 결과 저장
                         if pass_all and (selected_filters == [] or match_signals):
                             results.append({
                                 "종목명": name, "현재가": int(an["current"]),
@@ -171,7 +161,6 @@ with tab2:
             else:
                 st.warning("조건에 맞는 종목이 없습니다.")
 
-# --- 탭 3: 개별 분석 ---
 with tab3:
     query = st.text_input("🔍 분석할 기업명", key="single_query")
     if query:
