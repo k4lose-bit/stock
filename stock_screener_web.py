@@ -14,7 +14,7 @@ from modules.analyzer import StockAnalyzer
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
-# CSS 누출 방지 및 깔끔한 UI 스타일링
+# CSS 스타일링
 st.markdown('<meta name="format-detection" content="telephone=no">', unsafe_allow_html=True)
 st.markdown("""
 <style>
@@ -105,15 +105,12 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     if len(data['dates']) >= 6:
         st.write("#### 🕒 최근 5거래일 추이 (RSI & MACD 포함)")
         
-        # 🌟 일자별 RSI 및 MACD 계산 (pandas 활용)
         df_pr = pd.DataFrame({'Close': data['close_prices']})
         
-        # MACD (12, 26) 계산
         ema12 = df_pr['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df_pr['Close'].ewm(span=26, adjust=False).mean()
         df_pr['MACD'] = ema12 - ema26
         
-        # RSI (14) 계산
         delta_pr = df_pr['Close'].diff()
         gain = delta_pr.where(delta_pr > 0, 0).ewm(alpha=1/14, adjust=False).mean()
         loss = (-delta_pr.where(delta_pr < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
@@ -123,7 +120,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
         rsi_list = df_pr['RSI'].tolist()
         macd_list = df_pr['MACD'].tolist()
 
-        # 테이블 헤더에 RSI, MACD 추가
         table_html = "<table class='custom-table'><tr><th>날짜</th><th>종가</th><th>변동</th><th>등락률</th><th>거래량</th><th>RSI</th><th>MACD</th></tr>"
         
         for i in range(-2, -7, -1):
@@ -134,7 +130,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
             df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
             
-            # 일일 RSI 색상 처리 (70이상 빨강, 30이하 파랑)
             d_rsi = rsi_list[i]
             if pd.notna(d_rsi):
                 rsi_clr = "#f44336" if d_rsi >= 70 else ("#2196f3" if d_rsi <= 30 else "#424242")
@@ -142,7 +137,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             else:
                 rsi_str = "-"
                 
-            # 일일 MACD 색상 처리
             d_macd = macd_list[i]
             if pd.notna(d_macd):
                 macd_clr = "#f44336" if d_macd > 0 else ("#2196f3" if d_macd < 0 else "#424242")
@@ -265,18 +259,24 @@ else:
     with tab3:
         st.subheader("📥 데이터베이스 관리")
         
-        # 🌟 KRX 다운로드 안내 및 직통 링크 추가
         st.info("""
         **💡 전체 종목 CSV 파일 다운로드 방법**
         1. [KRX 정보데이터시스템 (여기 클릭)](http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201020101) 사이트에 접속합니다.
-        2. 화면 우측 상단의 **[CSV]** 버튼을 클릭하여 파일을 다운로드합니다.
-        3. 다운받은 파일을 아래 업로드 창에 끌어다 놓으시면 됩니다!
+        2. 화면 왼쪽 메뉴에서 **[기본통계] -> [주식] -> [종목정보] -> [전종목 기본정보]**를 클릭합니다.
+        3. 화면 우측 상단의 **[⬇️ (다운로드 아이콘)]**을 누르고 **[CSV]** 버튼을 클릭하여 파일을 다운로드합니다.
+        4. 다운받은 파일을 아래 업로드 창에 끌어다 놓으시면 됩니다!
         """)
         
         uploaded_file = st.file_uploader("전체 종목 리스트 CSV 업로드", type=['csv'])
         if uploaded_file is not None:
             try:
-                df = pd.read_csv(uploaded_file)
+                # 🌟 한국어 CSV 특유의 인코딩(글자 깨짐) 오류 방어 로직!
+                try:
+                    df = pd.read_csv(uploaded_file, encoding='utf-8')
+                except UnicodeDecodeError:
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, encoding='cp949') # 한국 공공기관 엑셀 기본 포맷
+                    
                 col_map = {}
                 for c in df.columns:
                     if "코드" in c or "code" in c.lower(): col_map[c] = "종목코드"
