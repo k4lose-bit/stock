@@ -84,7 +84,6 @@ def check_password():
         return False
     return True
 
-# 🌟 검색 기록 관리 기능
 def add_to_history(code, name, sector):
     item = {"code": code, "name": name, "sector": sector}
     if item in st.session_state.search_history:
@@ -93,7 +92,6 @@ def add_to_history(code, name, sector):
     if len(st.session_state.search_history) > 10:
         st.session_state.search_history.pop()
 
-# 🌟 반복되는 분석 리포트 출력을 하나의 함수로 깔끔하게 묶음
 def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
     with st.spinner(f"{name} 데이터를 분석 중입니다..."):
         data = fetcher.get_stock_data(code)
@@ -152,7 +150,6 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
             st.write("최근 일주일 이내 주요 뉴스가 없습니다.")
 
         st.divider()
-        # 관심종목 추가 버튼 배치
         if not any(s["code"] == code for s in st.session_state.custom_stocks):
             if st.button("➕ 이 종목을 '내 관심종목'에 추가하기", type="primary", use_container_width=True, key=f"add_btn_{code}"):
                 st.session_state.custom_stocks.append({"code": code, "name": name, "sector": sector})
@@ -168,7 +165,18 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 st.title("🚀 Stock Screener Pro (개인 맞춤형 UI 📊)")
 
-if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
+# 🌟 에러 방지(호환성 패치): 과거의 소괄호 데이터가 있으면 새 방식으로 자동 변환해주는 부분
+if "custom_stocks" not in st.session_state: 
+    st.session_state.custom_stocks = []
+else:
+    migrated_stocks = []
+    for s in st.session_state.custom_stocks:
+        if isinstance(s, tuple) and len(s) == 3:
+            migrated_stocks.append({"code": s[0], "name": s[1], "sector": s[2]})
+        elif isinstance(s, dict):
+            migrated_stocks.append(s)
+    st.session_state.custom_stocks = migrated_stocks
+
 if "search_history" not in st.session_state: st.session_state.search_history = []
 if "active_analysis" not in st.session_state: st.session_state.active_analysis = None
 
@@ -183,7 +191,6 @@ if check_password():
             st.session_state["password_correct"] = False
             st.rerun()
 
-    # 🌟 직관적인 2개의 탭으로 재구성
     tab1, tab2 = st.tabs(["🔍 종목 검색 및 상세분석", "⭐ 내 관심종목 & 포트폴리오 관리"])
 
     # -----------------------------------
@@ -194,7 +201,6 @@ if check_password():
         if st.session_state.search_history:
             cols = st.columns(5)
             for i, hist in enumerate(st.session_state.search_history):
-                # 5개씩 2줄로 배치하기 위한 꼼수
                 if cols[i % 5].button(f"{hist['name']}", key=f"hist_btn_{hist['code']}_{i}", use_container_width=True):
                     st.session_state.active_analysis = hist
                     st.rerun()
@@ -225,12 +231,10 @@ if check_password():
                     add_to_history(code, name, sector)
                     st.rerun()
 
-        # 분석할 타겟이 설정되어 있으면 화면에 리포트 렌더링
         if st.session_state.active_analysis:
             st.divider()
             target = st.session_state.active_analysis
             render_analysis_report(fetcher, analyzer, exc_rate, target["code"], target["name"], target["sector"])
-
 
     # -----------------------------------
     # 탭 2: 내 관심종목 및 포트폴리오
@@ -240,14 +244,12 @@ if check_password():
         if not st.session_state.custom_stocks:
             st.info("저장된 관심종목이 없습니다. '🔍 종목 검색 및 상세분석' 탭에서 종목을 추가해 보세요.")
         else:
-            # 전체 삭제 버튼
             col1, col2 = st.columns([8, 2])
             with col2:
                 if st.button("🗑️ 리스트 전체 비우기", use_container_width=True):
                     st.session_state.custom_stocks = []
                     st.rerun()
 
-            # 관심종목 리스트업 및 개별 분석/삭제 버튼
             for idx, stock in enumerate(st.session_state.custom_stocks):
                 c1, c2, c3 = st.columns([6, 2, 2])
                 c1.markdown(f"**{stock['name']}** `{stock['code']}`")
@@ -257,7 +259,7 @@ if check_password():
                     add_to_history(stock["code"], stock["name"], stock["sector"])
                     st.success(f"{stock['name']} 분석 화면으로 이동합니다!")
                     time.sleep(0.5)
-                    st.rerun() # 탭1로 분석 타겟을 넘기고 리프레시
+                    st.rerun() 
                     
                 if c3.button("❌ 삭제", key=f"port_del_{stock['code']}_{idx}", use_container_width=True):
                     st.session_state.custom_stocks.pop(idx)
