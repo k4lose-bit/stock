@@ -12,10 +12,10 @@ import xml.etree.ElementTree as ET
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# 🌟 최상단 설정 (가장 먼저 실행되어야 함)
+# 🌟 최상단 설정
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
-# 🌟 모바일 취소선 방지 및 PC 가독성 스타일
+# 모바일 취소선 방지 및 PC/모바일 통합 스타일
 st.markdown("""
     <meta name="format-detection" content="telephone=no">
     <style>
@@ -24,8 +24,6 @@ st.markdown("""
     .big-font { font-size:1.8rem !important; font-weight: bold; }
     .red-text { color: #f44336; font-weight: bold; }
     .blue-text { color: #2196f3; font-weight: bold; }
-    /* PC에서 로그인창이 너무 퍼지지 않게 조절 */
-    .login-box { max-width: 400px; margin: 0 auto; padding: 20px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -34,7 +32,8 @@ CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688
 @st.cache_data(ttl=3600)
 def get_exchange_rate():
     try:
-        return float(yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1])
+        rate = yf.Ticker("USDKRW=X").history(period="1d")
+        return float(rate['Close'].iloc[-1])
     except: return 1420.0
 
 @st.cache_data(ttl=3600)
@@ -49,7 +48,7 @@ def get_company_news(company_name):
 def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     data = fetcher.get_stock_data(item['code'])
     if not data:
-        st.error("⚠️ 데이터를 불러오지 못했습니다.")
+        st.error("⚠️ 데이터를 불러오지 못했습니다. 종목 코드나 네트워크를 확인해주세요.")
         return
 
     an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
@@ -65,6 +64,7 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     c1, c2, c3, c4 = st.columns(4)
     p_unit = "원" if curr > 1000 else "$"
     
+    # 숫자 안전 포맷팅
     curr_txt = f"{curr:,.2f}" if p_unit == "$" else f"{int(curr):,}"
     diff_txt = f"{diff:+,.2f}" if p_unit == "$" else f"{int(diff):+,}"
     conv_txt = f"{int(curr * exc_rate):,}"
@@ -73,7 +73,12 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     c1.caption(f"약 {conv_txt}원")
     
     c2.markdown(f"등락률  \n<span class='big-font {color_class}'>{chg:+.2f}%</span>", unsafe_allow_html=True)
-    c3.markdown(f"RSI  \n<span class='big-font'>{an['rsi']:.1f}</span>", unsafe_allow_html=True)
+    
+    # 🌟 RSI 에러 방지 처리
+    rsi_val = an.get('rsi')
+    rsi_txt = f"{rsi_val:.1f}" if rsi_val is not None else "-"
+    c3.markdown(f"RSI  \n<span class='big-font'>{rsi_txt}</span>", unsafe_allow_html=True)
+    
     c4.markdown(f"거래량  \n<span class='big-font'>{int(data['volume']):,}</span>", unsafe_allow_html=True)
 
     if len(data['dates']) >= 6:
@@ -98,8 +103,9 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     st.info(f"💡 [주달(Judal) 테마 확인]({judal_url})")
     for n in news: st.markdown(f"🔗 [{n['title']}]({n['link']})")
 
-    if not any(s["code"] == item['code'] for s in st.session_state.custom_stocks):
+    if not any(s["code"] == item['code'] for s in st.session_state.get("custom_stocks", [])):
         if st.button("➕ 관심종목 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True):
+            if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
             st.session_state.custom_stocks.append(item); st.rerun()
 
 # --- 메인 실행 로직 ---
@@ -109,23 +115,18 @@ if "search_history" not in st.session_state: st.session_state.search_history = [
 if "active_item" not in st.session_state: st.session_state.active_item = None
 if "port_code" not in st.session_state: st.session_state.port_code = None
 
-# 🌟 1단계: 로그인 체크
 if not st.session_state.pw_ok:
     st.title("🚀 Stock Screener Pro")
     st.write("---")
-    # PC에서도 정중앙에 위치하도록 컬럼 배치
     _, col, _ = st.columns([1, 1, 1])
     with col:
         st.subheader("🔒 로그인")
         pw = st.text_input("접속 비밀번호를 입력하세요", type="password")
         if st.button("들어가기", use_container_width=True, type="primary"):
             if hashlib.sha256(pw.encode()).hexdigest() == CORRECT_PASSWORD_HASH:
-                st.session_state.pw_ok = True
-                st.rerun()
-            else:
-                st.error("비밀번호가 틀렸습니다.")
+                st.session_state.pw_ok = True; st.rerun()
+            else: st.error("비밀번호가 틀렸습니다.")
 else:
-    # 🌟 2단계: 메인 컨텐츠
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
     
     if datetime.now().day == 13:
@@ -184,5 +185,4 @@ else:
         st.download_button("📊 현재 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"stock_list_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
         st.write("---")
         if st.button("🚪 로그아웃"):
-            st.session_state.pw_ok = False
-            st.rerun()
+            st.session_state.pw_ok = False; st.rerun()
