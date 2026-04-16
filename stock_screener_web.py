@@ -14,7 +14,6 @@ from modules.analyzer import StockAnalyzer
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
-# CSS 스타일링
 st.markdown('<meta name="format-detection" content="telephone=no">', unsafe_allow_html=True)
 st.markdown("""
 <style>
@@ -52,10 +51,8 @@ def get_company_news(company_name):
 def draw_card(title, value_str, diff_val, diff_str, caption=""):
     color_cls = "red" if diff_val > 0 else ("blue" if diff_val < 0 else "gray")
     arrow = "▲ " if diff_val > 0 else ("▼ " if diff_val < 0 else "")
-    
     delta_html = f"<div class='metric-delta {color_cls}'>{arrow}{diff_str}</div>" if diff_str else ""
     caption_html = f"<div class='metric-caption'>{caption}</div>" if caption else ""
-    
     return f"""
     <div class="metric-card">
         <div class="metric-title">{title}</div>
@@ -72,7 +69,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
         return
 
     an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
-    
     if not an:
         st.warning("⚠️ 상장 기간이 너무 짧거나 데이터가 부족하여 분석 지표를 계산할 수 없습니다.")
         return
@@ -104,7 +100,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
 
     if len(data['dates']) >= 6:
         st.write("#### 🕒 최근 5거래일 추이 (RSI & MACD 포함)")
-        
         df_pr = pd.DataFrame({'Close': data['close_prices']})
         
         ema12 = df_pr['Close'].ewm(span=12, adjust=False).mean()
@@ -134,26 +129,15 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             if pd.notna(d_rsi):
                 rsi_clr = "#f44336" if d_rsi >= 70 else ("#2196f3" if d_rsi <= 30 else "#424242")
                 rsi_str = f"<span style='color:{rsi_clr}; font-weight:bold;'>{d_rsi:.1f}</span>"
-            else:
-                rsi_str = "-"
+            else: rsi_str = "-"
                 
             d_macd = macd_list[i]
             if pd.notna(d_macd):
                 macd_clr = "#f44336" if d_macd > 0 else ("#2196f3" if d_macd < 0 else "#424242")
                 macd_str = f"<span style='color:{macd_clr}; font-weight:bold;'>{d_macd:.2f}</span>"
-            else:
-                macd_str = "-"
+            else: macd_str = "-"
             
-            table_html += f"<tr>"
-            table_html += f"<td>{data['dates'][i][5:]}</td>"
-            table_html += f"<td><b>{p_f}</b></td>"
-            table_html += f"<td style='color:{clr}; font-weight:bold;'>{df_f}</td>"
-            table_html += f"<td style='color:{clr}; font-weight:bold;'>{dc:+.2f}%</td>"
-            table_html += f"<td>{int(data['volumes'][i]):,}</td>"
-            table_html += f"<td>{rsi_str}</td>"
-            table_html += f"<td>{macd_str}</td>"
-            table_html += "</tr>"
-            
+            table_html += f"<tr><td>{data['dates'][i][5:]}</td><td><b>{p_f}</b></td><td style='color:{clr}; font-weight:bold;'>{df_f}</td><td style='color:{clr}; font-weight:bold;'>{dc:+.2f}%</td><td>{int(data['volumes'][i]):,}</td><td>{rsi_str}</td><td>{macd_str}</td></tr>"
         table_html += "</table>"
         st.markdown(table_html, unsafe_allow_html=True)
 
@@ -214,9 +198,8 @@ else:
             query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
             if query:
                 cands = search_candidates(query)
-                
                 if cands.empty:
-                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다. ⚙️관리 탭에서 CSV를 업로드하시거나 잠시 후 다시 시도해주세요.")
+                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다. 잠시 후 다시 시도해주세요.")
                 else:
                     options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
                     pick = st.selectbox("정확한 종목을 선택하세요", options)
@@ -258,43 +241,18 @@ else:
 
     with tab3:
         st.subheader("📥 데이터베이스 관리")
-        
         st.info("""
-        **💡 전체 종목 CSV 파일 다운로드 방법**
-        1. [KRX 정보데이터시스템 (여기 클릭)](http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201020101) 사이트에 접속합니다.
-        2. 화면 왼쪽 메뉴에서 **[기본통계] -> [주식] -> [종목정보] -> [전종목 기본정보]**를 클릭합니다.
-        3. 화면 우측 상단의 **[⬇️ (다운로드 아이콘)]**을 누르고 **[CSV]** 버튼을 클릭하여 파일을 다운로드합니다.
-        4. 다운받은 파일을 아래 업로드 창에 끌어다 놓으시면 됩니다!
+        **💡 관리자 전용 DB 갱신 안내**
+        보안 및 안정성을 위해 종목 데이터베이스 갱신은 앱 외부(서버/깃허브)에서 진행됩니다.
+        1. [KRX 정보데이터시스템](http://data.krx.co.kr/contents/MDC/MDI/mdiLoader/index.cmd?menuId=MDC0201020101) 접속 > [기본통계] > [주식] > [종목정보] > [전종목 기본정보]
+        2. 우측 상단의 [⬇️ 다운로드] 버튼을 눌러 **CSV 파일**을 다운받습니다.
+        3. 다운받은 파일 이름을 **`krx_stock_list.csv`** 로 변경합니다.
+        4. GitHub 등 앱 소스 코드가 있는 저장소에 해당 파일을 덮어쓰기(업로드) 하시면 자동으로 앱에 반영됩니다.
         """)
-        
-        uploaded_file = st.file_uploader("전체 종목 리스트 CSV 업로드", type=['csv'])
-        if uploaded_file is not None:
-            try:
-                # 🌟 한국어 CSV 특유의 인코딩(글자 깨짐) 오류 방어 로직!
-                try:
-                    df = pd.read_csv(uploaded_file, encoding='utf-8')
-                except UnicodeDecodeError:
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, encoding='cp949') # 한국 공공기관 엑셀 기본 포맷
-                    
-                col_map = {}
-                for c in df.columns:
-                    if "코드" in c or "code" in c.lower(): col_map[c] = "종목코드"
-                    elif "명" in c or "name" in c.lower(): col_map[c] = "회사명"
-                    elif "섹터" in c or "업종" in c: col_map[c] = "섹터"
-                df = df.rename(columns=col_map)
-                df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
-                if '섹터' not in df.columns: df['섹터'] = '기타'
-                
-                st.session_state.uploaded_db = df[['종목코드', '회사명', '섹터']].dropna()
-                st.success(f"✅ {len(st.session_state.uploaded_db)}개의 종목 데이터가 성공적으로 반영되었습니다!")
-            except Exception as e:
-                st.error(f"오류가 발생했습니다: {e}")
-
         st.write("---")
         db_df = get_stock_db()
         csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📊 현재 앱에 적용된 종목 리스트 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+        st.download_button("📊 현재 앱에 적용된 종목 리스트 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list_active.csv", mime="text/csv")
         st.write("---")
         if st.button("🚪 로그아웃", type="primary"):
             st.session_state.pw_ok = False; st.rerun()
