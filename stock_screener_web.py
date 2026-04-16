@@ -18,10 +18,9 @@ st.markdown("""
     <style>
         a[href^="tel"] { color: inherit !important; text-decoration: none !important; }
         div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
-        .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-            font-size: 1.1rem;
-            font-weight: bold;
-        }
+        /* 상승/하락 색상 강조 (한국 국룰 버전) */
+        [data-testid="stMetricDelta"] svg { display: none; } /* 기본 화살표 숨김 */
+        [data-testid="stMetricDelta"] > div { font-weight: bold !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -102,25 +101,36 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
         p_str = f"{int(curr):,}원" if curr > 1000 else f"${curr:.2f}"
         d_str = f"{int(diff):+,}원" if curr > 1000 else f"${diff:+.2f}"
         
+        # 🌟 현재가 색상 처리 (빨강/파랑)
         c1.metric("현재가", p_str, d_str)
         c1.caption(f"약 {int(curr * exc_rate):,}원")
-        c2.metric("등락률", f"{an['change']:.2f}%")
+        
+        c2.metric("등락률", f"{an['change']:.2f}%", f"{an['change']:+.2f}%")
         c3.metric("RSI", f"{an['rsi']:.1f}")
         c4.metric("거래량", f"{int(an['volume']):,}")
         
         if len(data['dates']) >= 10:
-            st.write("#### 🕒 최근 5거래일 추이")
+            st.write("#### 🕒 최근 5거래일 추이 (전일 대비)")
             hist = []
             for i in range(-2, -7, -1):
                 p_past, p_old = data['close_prices'][i], data['close_prices'][i-1]
                 df_val = p_past - p_old
-                hist.append({
+                chg = ((p_past - p_old) / p_old) * 100
+                
+                # 색상 입히기 (HTML)
+                color = "#e53935" if df_val > 0 else ("#1e88e5" if df_val < 0 else "#666")
+                
+                # 테이블 데이터 구성
+                row_data = {
                     "날짜": data['dates'][i][5:],
                     "종가": f"{int(p_past):,}원" if curr > 1000 else f"${p_past:.2f}",
-                    "전일대비": f"{int(df_val):+,}원" if curr > 1000 else f"${df_val:+.2f}",
-                    "등락률": f"{((p_past-p_old)/p_old)*100:+.2f}%",
+                    "변동": f"{int(df_val):+,}원" if curr > 1000 else f"${df_val:+.2f}",
+                    "등락률": f"{chg:+.2f}%",
                     "거래량": f"{int(data['volumes'][i]):,}"
-                })
+                }
+                hist.append(row_data)
+            
+            # 테이블 스타일링 적용하여 출력
             st.table(pd.DataFrame(hist).set_index("날짜"))
 
         st.divider()
@@ -144,7 +154,7 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
         for d in an['details']: st.success(d)
         
         st.divider()
-        st.subheader(f"📰 '{item['name']}' 주요 분석")
+        st.subheader(f"📰 '{item['name']}' 주요 뉴스 및 분석")
         judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
         st.info(f"💡 [주달(Judal)에서 '{item['name']}' 테마 확인하기]({judal_url})")
         if news_list:
@@ -152,7 +162,7 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
         
         st.divider()
         if not any(s["code"] == item['code'] for s in st.session_state.custom_stocks):
-            if st.button("➕ 관심종목 추가", use_container_width=True, type="primary", key=f"add_port_{item['code']}_{key_suffix}"):
+            if st.button("➕ 관심종목 추가", use_container_width=True, type="primary", key=f"add_{item['code']}_{key_suffix}"):
                 st.session_state.custom_stocks.append(item)
                 st.rerun()
 
@@ -165,22 +175,22 @@ if "port_active_code" not in st.session_state: st.session_state.port_active_code
 if check_password():
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
     
-    tab1, tab2 = st.tabs(["🔍 분석", "⭐ 관심종목"])
+    tab1, tab2 = st.tabs(["🔍 종목 분석", "⭐ 관심종목 리스트"])
 
     with tab1:
-        st.markdown("### 🕒 최근 검색 기록")
+        st.markdown("### 🕒 최근 검색")
         if st.session_state.search_history:
             cols = st.columns(5)
             for i, h in enumerate(st.session_state.search_history):
                 if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
                     st.session_state.active_item = h; st.rerun()
         
-        query = st.text_input("종목 검색 (IREN, BTQ, 삼성전자...)", key="main_search")
+        query = st.text_input("종목 검색 (삼성전자, IREN, BTQ...)", key="main_search", placeholder="기업명이나 티커 입력 후 Enter")
         if query:
             cands = search_candidates(query, limit=5)
             if not cands.empty:
-                pick = st.selectbox("검색 결과 선택", [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()])
-                if st.button("📊 분석 시작", type="primary"):
+                pick = st.selectbox("정확한 종목 선택", [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()])
+                if st.button("📊 즉시 분석", type="primary"):
                     code_raw = pick.split("(")[1].replace(")", "")
                     name_raw = pick.split(" (")[0]
                     item = {"code": code_raw, "name": name_raw, "sector": "기타"}
@@ -192,32 +202,22 @@ if check_password():
             render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, key_suffix="tab1")
 
     with tab2:
-        st.markdown("### ⭐ 내 관심종목 리스트")
-        if not st.session_state.custom_stocks: st.info("관심종목이 없습니다.")
+        if not st.session_state.custom_stocks: st.info("관심종목을 추가해 보세요.")
         else:
-            if st.button("🗑️ 리스트 비우기"): st.session_state.custom_stocks = []; st.rerun()
+            if st.button("🗑️ 리스트 전체 삭제"): st.session_state.custom_stocks = []; st.rerun()
             
             for i, s in enumerate(st.session_state.custom_stocks):
-                # 종목 한 줄 레이아웃
                 c1, c2, c3 = st.columns([5, 3, 2])
                 c1.write(f"**{s['name']}** ({s['code']})")
                 
-                # 분석 버튼을 누르면 해당 종목의 코드를 활성화
-                if c2.button("📊 분석", key=f"port_an_{i}", use_container_width=True):
-                    if st.session_state.port_active_code == s['code']:
-                        st.session_state.port_active_code = None # 이미 열려있으면 닫기
-                    else:
-                        st.session_state.port_active_code = s['code'] # 분석 리포트 열기
+                btn_label = "🔼 닫기" if st.session_state.port_active_code == s['code'] else "📊 분석"
+                if c2.button(btn_label, key=f"port_an_{i}", use_container_width=True):
+                    st.session_state.port_active_code = None if st.session_state.port_active_code == s['code'] else s['code']
                     st.rerun()
                     
                 if c3.button("❌", key=f"port_del_{i}", use_container_width=True):
                     st.session_state.custom_stocks.pop(i); st.rerun()
                 
-                # 🌟 [해결책] 선택된 종목 바로 아래에 리포트 렌더링
                 if st.session_state.port_active_code == s['code']:
-                    st.markdown(f"---")
                     render_report(fetcher, analyzer, exc_rate, s, key_suffix=f"tab2_{i}")
-                    if st.button("🔼 분석 리포트 닫기", key=f"close_{i}", use_container_width=True):
-                        st.session_state.port_active_code = None
-                        st.rerun()
-                    st.markdown(f"---")
+                    st.divider()
