@@ -1,3 +1,7 @@
+streamlit
+pandas
 yfinance
 gspread
 oauth2client
+ta
+pandas-ta
