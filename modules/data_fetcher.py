@@ -10,13 +10,12 @@ def get_stock_db():
     csv_path = "krx_stock_list.csv"
     if os.path.exists(csv_path):
         try:
-            # KRX 인코딩 문제(cp949 vs utf-8) 자동 해결
+            # 🌟 dtype=str 로 읽어서 종목코드 앞의 '0'이 날아가는 현상 방지
             try:
-                df = pd.read_csv(csv_path, encoding='utf-8')
+                df = pd.read_csv(csv_path, encoding='utf-8', dtype=str)
             except UnicodeDecodeError:
-                df = pd.read_csv(csv_path, encoding='cp949')
+                df = pd.read_csv(csv_path, encoding='cp949', dtype=str)
             
-            # KRX 다운로드 포맷에 맞춘 컬럼명 자동 매핑
             rename_dict = {}
             for col in df.columns:
                 if col in ['단축코드', '종목코드', 'Code']: rename_dict[col] = '종목코드'
@@ -24,18 +23,18 @@ def get_stock_db():
                 elif col in ['시장구분', '업종명', '섹터', 'Sector']: rename_dict[col] = '섹터'
             
             df = df.rename(columns=rename_dict)
-            
-            # 'DataFrame' object has no attribute 'str' 오류 방지 (중복 컬럼 제거)
             df = df.loc[:, ~df.columns.duplicated()]
             
             if '종목코드' in df.columns and '회사명' in df.columns:
                 df['종목코드'] = df['종목코드'].astype(str).str.zfill(6)
+                # 회사명 앞뒤 공백 제거 및 텍스트화
+                df['회사명'] = df['회사명'].astype(str).str.strip() 
                 if '섹터' not in df.columns: df['섹터'] = '기타'
                 return df[['종목코드', '회사명', '섹터']].dropna()
         except Exception as e:
             print(f"CSV 로드 에러: {e}")
 
-    # 2. 파일이 없거나 깨졌을 때를 대비한 비상용 기본 데이터
+    # 2. 비상용 기본 데이터
     return pd.DataFrame([
         {'회사명': '삼성전자', '종목코드': '005930', '섹터': '반도체'},
         {'회사명': 'SK하이닉스', '종목코드': '000660', '섹터': '반도체'},
@@ -51,7 +50,13 @@ def search_candidates(query, limit=15):
     q = (query or "").strip().upper()
     if not q: return df.head(0)
     
-    results = df[df["회사명"].str.upper().str.contains(q, na=False)].copy()
+    # 🌟 띄어쓰기 무시 검색: 'HD현대'나 'HD 현대' 모두 검색되도록 강력하게 수정
+    q_no_space = q.replace(" ", "")
+    df['검색용회사명'] = df['회사명'].str.replace(" ", "").str.upper()
+    
+    results = df[df["검색용회사명"].str.contains(q_no_space, na=False)].copy()
+    results = results.drop(columns=['검색용회사명']) # 임시 컬럼 삭제
+    
     if re.match(r'^[A-Z]+$', q):
         us_row = pd.DataFrame([{'회사명': q, '종목코드': q, '섹터': '미국 주식'}])
         results = pd.concat([us_row, results])
