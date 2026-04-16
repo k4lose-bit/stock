@@ -14,32 +14,22 @@ from modules.analyzer import StockAnalyzer
 
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
-# 🌟 주석을 지워서 화면에 노출되는 버그를 잡았습니다.
+# 🌟 CSS 누출 버그 완벽 차단 (태그 분리)
+st.markdown('<meta name="format-detection" content="telephone=no">', unsafe_allow_html=True)
 st.markdown("""
-    <meta name="format-detection" content="telephone=no">
-    <style>
-    div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
-    
-    .metric-card {
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
-        border-radius: 12px;
-        padding: 20px 10px;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        margin-bottom: 15px;
-    }
-    .metric-title { color: #616161; font-size: 1.0rem; font-weight: 600; margin-bottom: 8px; }
-    .metric-value { color: #212121; font-size: 1.9rem; font-weight: 800; }
-    .metric-delta.red { color: #f44336; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
-    .metric-delta.blue { color: #2196f3; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
-    .metric-delta.gray { color: #9e9e9e; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
-    .metric-caption { color: #9e9e9e; font-size: 0.85rem; margin-top: 5px; }
-
-    .custom-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    .custom-table th, .custom-table td { border-bottom: 1px solid #eeeeee; padding: 12px 8px; text-align: center; font-size: 0.95rem; }
-    .custom-table th { background-color: #f8f9fa; color: #424242; font-weight: bold; }
-    </style>
+<style>
+div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
+.metric-card { background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
+.metric-title { color: #616161; font-size: 1.0rem; font-weight: 600; margin-bottom: 8px; }
+.metric-value { color: #212121; font-size: 1.9rem; font-weight: 800; }
+.metric-delta.red { color: #f44336; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+.metric-delta.blue { color: #2196f3; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+.metric-delta.gray { color: #9e9e9e; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+.metric-caption { color: #9e9e9e; font-size: 0.85rem; margin-top: 5px; }
+.custom-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.custom-table th, .custom-table td { border-bottom: 1px solid #eeeeee; padding: 12px 8px; text-align: center; font-size: 0.95rem; }
+.custom-table th { background-color: #f8f9fa; color: #424242; font-weight: bold; }
+</style>
 """, unsafe_allow_html=True)
 
 CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
@@ -186,24 +176,28 @@ else:
                     st.session_state.active_item = h; st.rerun()
         
         st.divider()
-        query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
-        if query:
-            cands = search_candidates(query)
-            
-            if cands.empty:
-                st.warning(f"'{query}'에 대한 검색 결과가 없습니다. ⚙️관리 탭에서 CSV를 업로드하시거나 잠시 후 다시 시도해주세요.")
-            else:
-                options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
-                pick = st.selectbox("정확한 종목을 선택하세요", options)
-                if st.button("📊 즉시 분석", type="primary", use_container_width=True):
-                    code = pick.split("(")[1].replace(")", "")
-                    name = pick.split(" (")[0]
-                    item = {"code": code, "name": name, "sector": "기타"}
-                    st.session_state.active_item = item
-                    st.session_state.search_history = [i for i in st.session_state.search_history if i['code'] != code]
-                    st.session_state.search_history.insert(0, item)
-                    st.session_state.search_history = st.session_state.search_history[:10]
-                    st.rerun()
+        
+        # 🌟 PC에서 너무 넓게 펴지는 것을 막고 적당한 길이로 중앙 정렬
+        _, search_col, _ = st.columns([1, 2, 1])
+        with search_col:
+            query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
+            if query:
+                cands = search_candidates(query)
+                
+                if cands.empty:
+                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다. ⚙️관리 탭에서 전체종목 CSV를 업로드 해주세요.")
+                else:
+                    options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
+                    pick = st.selectbox("정확한 종목을 선택하세요", options)
+                    if st.button("📊 즉시 분석", type="primary", use_container_width=True):
+                        code = pick.split("(")[1].replace(")", "")
+                        name = pick.split(" (")[0]
+                        item = {"code": code, "name": name, "sector": "기타"}
+                        st.session_state.active_item = item
+                        st.session_state.search_history = [i for i in st.session_state.search_history if i['code'] != code]
+                        st.session_state.search_history.insert(0, item)
+                        st.session_state.search_history = st.session_state.search_history[:10]
+                        st.rerun()
 
         if st.session_state.active_item:
             st.divider()
