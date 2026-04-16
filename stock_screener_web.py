@@ -11,7 +11,7 @@ from deep_translator import GoogleTranslator
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# 🌟 최상단 설정 및 모바일 최적화 CSS
+# 최상단 설정 및 모바일 최적화 CSS
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 st.markdown("""
     <meta name="format-detection" content="telephone=no">
@@ -85,7 +85,7 @@ def add_to_history(item):
     st.session_state.search_history.insert(0, item)
     st.session_state.search_history = st.session_state.search_history[:10]
 
-def render_report(fetcher, analyzer, exc_rate, item):
+def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     with st.spinner(f"{item['name']} 분석 중..."):
         data = fetcher.get_stock_data(item['code'])
         if not data: 
@@ -144,16 +144,15 @@ def render_report(fetcher, analyzer, exc_rate, item):
         for d in an['details']: st.success(d)
         
         st.divider()
-        st.subheader(f"📰 '{item['name']}' 주요 뉴스 및 분석")
+        st.subheader(f"📰 '{item['name']}' 주요 분석")
         judal_url = f"https://www.google.com/search?q=site:judal.co.kr+{urllib.parse.quote(item['name'])}+투자분석"
         st.info(f"💡 [주달(Judal)에서 '{item['name']}' 테마 확인하기]({judal_url})")
         if news_list:
             for news in news_list: st.markdown(f"🔗 [{news['title']}]({news['link']})")
-        else: st.write("최근 뉴스가 없습니다.")
         
         st.divider()
         if not any(s["code"] == item['code'] for s in st.session_state.custom_stocks):
-            if st.button("➕ 관심종목 추가", use_container_width=True, type="primary"):
+            if st.button("➕ 관심종목 추가", use_container_width=True, type="primary", key=f"add_port_{item['code']}_{key_suffix}"):
                 st.session_state.custom_stocks.append(item)
                 st.rerun()
 
@@ -161,22 +160,14 @@ def render_report(fetcher, analyzer, exc_rate, item):
 if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
 if "search_history" not in st.session_state: st.session_state.search_history = []
 if "active_item" not in st.session_state: st.session_state.active_item = None
-# 🌟 탭 상태 추적을 위한 초기화
-if "selected_tab_index" not in st.session_state: st.session_state.selected_tab_index = 0
+if "port_active_code" not in st.session_state: st.session_state.port_active_code = None
 
 if check_password():
     fetcher, analyzer, exc_rate = DataFetcher(), StockAnalyzer(), get_exchange_rate()
     
-    with st.sidebar:
-        st.success("✅ 로그인 상태")
-        if st.button("로그아웃"): st.session_state["password_correct"] = False; st.rerun()
+    tab1, tab2 = st.tabs(["🔍 분석", "⭐ 관심종목"])
 
-    # 🌟 상단 탭 복구! (index 속성을 세션 상태와 연동)
-    tab_titles = ["🔍 분석", "⭐ 관심종목"]
-    t1, t2 = st.tabs(tab_titles)
-
-    # --- 탭 1: 분석 ---
-    with t1:
+    with tab1:
         st.markdown("### 🕒 최근 검색 기록")
         if st.session_state.search_history:
             cols = st.columns(5)
@@ -198,22 +189,35 @@ if check_password():
 
         if st.session_state.active_item:
             st.divider()
-            render_report(fetcher, analyzer, exc_rate, st.session_state.active_item)
+            render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, key_suffix="tab1")
 
-    # --- 탭 2: 관심종목 ---
-    with t2:
+    with tab2:
         st.markdown("### ⭐ 내 관심종목 리스트")
         if not st.session_state.custom_stocks: st.info("관심종목이 없습니다.")
         else:
             if st.button("🗑️ 리스트 비우기"): st.session_state.custom_stocks = []; st.rerun()
+            
             for i, s in enumerate(st.session_state.custom_stocks):
+                # 종목 한 줄 레이아웃
                 c1, c2, c3 = st.columns([5, 3, 2])
                 c1.write(f"**{s['name']}** ({s['code']})")
+                
+                # 분석 버튼을 누르면 해당 종목의 코드를 활성화
                 if c2.button("📊 분석", key=f"port_an_{i}", use_container_width=True):
-                    st.session_state.active_item = s
-                    add_to_history(s)
-                    # 🌟 탭 1로 이동하게끔 안내 문구 표시 (스트림릿 탭 제약 때문)
-                    st.success(f"'{s['name']}' 분석 데이터가 준비되었습니다. 첫 번째 탭을 클릭해 주세요!")
-                    time.sleep(0.5)
+                    if st.session_state.port_active_code == s['code']:
+                        st.session_state.port_active_code = None # 이미 열려있으면 닫기
+                    else:
+                        st.session_state.port_active_code = s['code'] # 분석 리포트 열기
+                    st.rerun()
+                    
                 if c3.button("❌", key=f"port_del_{i}", use_container_width=True):
                     st.session_state.custom_stocks.pop(i); st.rerun()
+                
+                # 🌟 [해결책] 선택된 종목 바로 아래에 리포트 렌더링
+                if st.session_state.port_active_code == s['code']:
+                    st.markdown(f"---")
+                    render_report(fetcher, analyzer, exc_rate, s, key_suffix=f"tab2_{i}")
+                    if st.button("🔼 분석 리포트 닫기", key=f"close_{i}", use_container_width=True):
+                        st.session_state.port_active_code = None
+                        st.rerun()
+                    st.markdown(f"---")
