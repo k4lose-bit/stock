@@ -112,10 +112,27 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
 
         st.header(f"📈 {name} 상세 분석 리포트")
         c1, c2, c3, c4 = st.columns(4)
-        curr = an['current']
-        krw_price = f"{int(curr):,}원" if curr > 1000 else f"${curr:.2f} (약 {int(curr * exc_rate):,}원)"
         
-        c1.metric("현재가", krw_price)
+        # 🌟 현재가 및 전일 대비 차액 계산
+        curr = an['current']
+        prev_close = data.get("prev_close", curr)
+        day_diff = curr - prev_close
+        
+        if curr > 1000:
+            krw_price = f"{int(curr):,}원"
+            day_diff_str = f"{int(day_diff):+,}원"
+            sub_price = f"약 {int(curr * exc_rate):,}원"
+        else:
+            krw_price = f"${curr:.2f}"
+            day_diff_str = f"${day_diff:+.2f}"
+            sub_price = f"약 {int(curr * exc_rate):,}원"
+            
+        diff_color = "red" if day_diff > 0 else ("blue" if day_diff < 0 else "gray")
+        
+        # 현재가 메트릭 표시 (전일대비 차액 포함)
+        c1.metric("현재가", krw_price, day_diff_str)
+        st.markdown(f"<div style='margin-top:-25px; margin-left:10px; font-size:0.9rem; color:gray;'>{sub_price}</div>", unsafe_allow_html=True)
+        
         c2.metric("당일 등락률", f"{an['change']:.2f}%")
         c3.metric("RSI", f"{an['rsi']:.1f}")
         c4.metric("거래량", f"{int(an['volume']):,}")
@@ -127,30 +144,30 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
         if len(dates) >= 20: 
             for c in [c1, c2, c3, c4]: c.markdown("<hr style='margin: 5px 0;'>", unsafe_allow_html=True)
             
-            # 과거 5일 추이 리스트업
+            # 🌟 최근 5거래일 추이 (전일 대비 차액 표시)
             for i in range(-2, -7, -1):
-                if abs(i) > len(dates): break
+                if abs(i-1) > len(dates): break
                 d_short = dates[i][5:]
-                p_past = prices[i]
-                diff = curr - p_past
+                p_past = prices[i] # 해당일 종가
+                p_before = prices[i-1] # 해당일의 전일 종가
+                diff_prev = p_past - p_before # 전일 대비 차액
                 
-                # 금액 차이 표시
                 if curr > 1000:
-                    diff_str = f"({int(diff):+,}원)"
                     p_str = f"{int(p_past):,}원"
+                    d_prev_str = f"({int(diff_prev):+,}원)"
                 else:
-                    diff_str = f"(${diff:+.2f})"
                     p_str = f"${p_past:.2f}"
+                    d_prev_str = f"({diff_prev:+.2f})"
                 
-                diff_color = "#e53935" if diff > 0 else ("#1e88e5" if diff < 0 else "#666")
-                c1.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | {p_str} <span style='color:{diff_color}; font-weight:bold;'>{diff_str}</span></div>", unsafe_allow_html=True)
+                prev_color = "#e53935" if diff_prev > 0 else ("#1e88e5" if diff_prev < 0 else "#666")
+                c1.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | {p_str} <span style='color:{prev_color}; font-weight:bold;'>{d_prev_str}</span></div>", unsafe_allow_html=True)
                 
-                # 일별 등락률 (전일 대비)
-                chg = ((prices[i] - prices[i-1]) / prices[i-1]) * 100
+                # 일별 등락률
+                chg = ((p_past - p_before) / p_before) * 100
                 chg_color = "#e53935" if chg > 0 else ("#1e88e5" if chg < 0 else "#666")
                 c2.markdown(f"<div style='font-size:0.8rem; color:{chg_color};'>{d_short} | <b>{chg:+.2f}%</b></div>", unsafe_allow_html=True)
                 
-                # 일별 RSI (🌟 에러가 났던 수치 포맷팅 방어 강화)
+                # 일별 RSI
                 rsi_val = analyzer.indicator.calculate_rsi(prices[:i+1])
                 rsi_display = f"{rsi_val:.1f}" if rsi_val is not None else "-"
                 c3.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{rsi_display}</b></div>", unsafe_allow_html=True)
