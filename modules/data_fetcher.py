@@ -4,9 +4,6 @@ import yfinance as yf
 import FinanceDataReader as fdr
 import re
 import os
-import urllib.parse
-import requests
-import xml.etree.ElementTree as ET
 from io import StringIO
 
 EMBEDDED_MINI_CSV = """
@@ -91,6 +88,9 @@ class DataFetcher:
 
             if df is None or df.empty or len(df) < 35: return None
 
+            # 🌟 인터넷에서 '날짜' 정보도 함께 메모하도록 추가됨
+            dates = df.index.tz_localize(None).strftime('%Y.%m.%d').tolist()
+
             return {
                 "current": float(df.iloc[-1]["Close"]),
                 "open": float(df.iloc[-1]["Open"]),
@@ -98,6 +98,7 @@ class DataFetcher:
                 "volume": float(df.iloc[-1]["Volume"]),
                 "close_prices": df["Close"].astype(float).tolist(),
                 "volumes": df["Volume"].astype(float).tolist(),
+                "dates": dates 
             }
         except Exception: return None
 
@@ -105,23 +106,3 @@ class DataFetcher:
         offline_map = st.session_state.get("offline_price_data", {})
         if isinstance(offline_map, dict) and code in offline_map: return offline_map[code]
         return self.get_stock_data_live(code)
-
-    # 🌟 새롭게 추가된 기능: 기업 관련 최신 뉴스 긁어오기
-    @st.cache_data(ttl=3600)
-    def get_company_news(_self, company_name, limit=5):
-        try:
-            search_query = urllib.parse.quote(f"{company_name} 주식")
-            url = f"https://news.google.com/rss/search?q={search_query}&hl=ko&gl=KR&ceid=KR:ko"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            response = requests.get(url, headers=headers, timeout=5)
-            root = ET.fromstring(response.text)
-            
-            news_list = []
-            for item in root.findall('.//item')[:limit]:
-                title = item.find('title').text
-                link = item.find('link').text
-                news_list.append({"title": title, "link": link})
-            return news_list
-        except Exception as e:
-            print(f"[ERROR] 뉴스 가져오기 실패: {e}")
-            return []
