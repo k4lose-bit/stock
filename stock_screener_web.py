@@ -3,7 +3,7 @@ import pandas as pd
 import hashlib
 import time
 
-from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates, parse_ohlcv_csv
+from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
 CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688a7afe8339"
