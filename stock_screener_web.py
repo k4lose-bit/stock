@@ -6,9 +6,6 @@ import yfinance as yf
 import urllib.parse
 import requests
 import xml.etree.ElementTree as ET
-import re
-from datetime import datetime
-import email.utils
 
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
@@ -36,34 +33,34 @@ def get_company_news(company_name, limit=5):
         for item in root.findall('.//item')[:limit]:
             title = item.find('title').text
             link = item.find('link').text
-            
-            # 발행 날짜 깔끔하게 변환
-            pub_date_str = ""
-            pub_date_element = item.find('pubDate')
-            if pub_date_element is not None and pub_date_element.text:
-                try:
-                    parsed_date = email.utils.parsedate_tz(pub_date_element.text)
-                    dt = datetime.fromtimestamp(email.utils.mktime_tz(parsed_date))
-                    pub_date_str = dt.strftime("%Y년 %m월 %d일 %H:%M")
-                except:
-                    pub_date_str = pub_date_element.text
-
-            # 언론사 정보 추출
-            source_str = "알 수 없음"
-            source_element = item.find('source')
-            if source_element is not None and source_element.text:
-                source_str = source_element.text
-
-            news_list.append({
-                "title": title,
-                "link": link,
-                "pub_date": pub_date_str,
-                "source": source_str
-            })
+            news_list.append({"title": title, "link": link})
         return news_list
     except Exception as e:
         print(f"[ERROR] 뉴스 가져오기 실패: {e}")
         return []
+
+# 🌟 새롭게 추가된 기능: 기업 개요 및 테마 정보 가져오기
+@st.cache_data(ttl=3600*24)
+def get_company_profile(code):
+    try:
+        if code.isdigit() and len(code) == 6:
+            stock = yf.Ticker(code + ".KS")
+            info = stock.info
+            if 'longBusinessSummary' not in info:
+                stock = yf.Ticker(code + ".KQ")
+                info = stock.info
+        else:
+            stock = yf.Ticker(code)
+            info = stock.info
+            
+        return {
+            "sector": info.get("sector", "알 수 없음"),
+            "industry": info.get("industry", "알 수 없음"),
+            "summary": info.get("longBusinessSummary", "기업 개요 데이터가 제공되지 않는 종목입니다."),
+            "website": info.get("website", "")
+        }
+    except Exception:
+        return None
 
 def check_password():
     if "password_correct" not in st.session_state:
@@ -232,9 +229,10 @@ if check_password():
                 sector = str(cands.iloc[idx].get("섹터", "기타"))
 
                 if st.button("📊 상세 분석 시작", type="primary"):
-                    with st.spinner(f"{name} 데이터를 분석하고 최근 뉴스를 가져오는 중..."):
+                    with st.spinner(f"{name} 기업 정보 및 데이터를 가져오는 중..."):
                         data = fetcher.get_stock_data(code)
                         news_list = get_company_news(name)
+                        profile = get_company_profile(code) # 기업 정보 호출
                         
                         if data:
                             an = analyzer.analyze(code, name, sector, data)
@@ -251,21 +249,31 @@ if check_password():
                                 
                                 st.divider()
                                 
+                                # 🌟 새롭게 추가된 기업 개요 섹션
+                                st.subheader("🏢 기업 개요 및 섹터 정보")
+                                if profile:
+                                    st.markdown(f"**섹터(Sector):** {profile['sector']} &nbsp;|&nbsp; **산업(Industry):** {profile['industry']}")
+                                    if profile['website']:
+                                        st.markdown(f"**웹사이트:** [{profile['website']}]({profile['website']})")
+                                    # 영문/국문이 섞여 나올 수 있는 비즈니스 요약
+                                    st.info(profile['summary'])
+                                else:
+                                    st.write("해당 기업의 개요 정보를 불러올 수 없습니다.")
+
+                                st.divider()
+                                
                                 st.subheader("💡 종합 지표 분석 의견")
                                 st.markdown(f"### {an['recommendation_color']} **{an['recommendation']}**")
                                 for detail in an['details']:
-                                    st.info(detail)
+                                    st.success(detail) # 색상을 조금 더 눈에 띄게 변경
                                 
                                 st.divider()
 
-                                # 🌟 새롭게 디자인된 뉴스 UI 부분
+                                # 📰 뉴스는 다시 링크 형태로 원상복구
                                 st.subheader(f"📰 '{name}' 최근 1주일 주요 뉴스")
                                 if news_list:
                                     for news in news_list:
-                                        # st.expander를 이용해 클릭하면 열리는 아코디언 메뉴 생성
-                                        with st.expander(f"🗞️ {news['title']} ({news['source']})"):
-                                            st.write(f"🕒 **발행 시간:** {news['pub_date']}")
-                                            st.markdown(f"🔗 **[여기를 클릭하여 전체 기사 내용 읽기]({news['link']})**")
+                                        st.markdown(f"🔗 [{news['title']}]({news['link']})")
                                 else:
                                     st.write("최근 일주일 이내에 등록된 주요 뉴스가 없습니다.")
                         else:
