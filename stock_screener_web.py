@@ -61,7 +61,7 @@ def get_company_profile(code):
             ko_industry = translator.translate(raw_industry) if raw_industry != "알 수 없음" else raw_industry
             ko_summary = translator.translate(raw_summary) if raw_summary != "기업 개요 데이터가 제공되지 않습니다." else raw_summary
         except Exception:
-            ko_sector, ko_industry, ko_summary = raw_sector, raw_industry, raw_summary + "\n\n(번역기 오류로 원문 제공)"
+            ko_sector, ko_industry, ko_summary = raw_sector, raw_industry, raw_summary
             
         return {
             "sector": ko_sector, "industry": ko_industry, "summary": ko_summary,
@@ -90,6 +90,7 @@ def check_password():
 
 def add_to_history(code, name, sector):
     item = {"code": code, "name": name, "sector": sector}
+    if "search_history" not in st.session_state: st.session_state.search_history = []
     if item in st.session_state.search_history:
         st.session_state.search_history.remove(item)
     st.session_state.search_history.insert(0, item)
@@ -126,15 +127,15 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
         if len(dates) >= 20: 
             for c in [c1, c2, c3, c4]: c.markdown("<hr style='margin: 5px 0;'>", unsafe_allow_html=True)
             
-            # 🌟 최근 5거래일(어제~5일전) 일별 추이 및 '현재가와의 차이' 표시
+            # 과거 5일 추이 (오류 수정 패치 적용)
             for i in range(-2, -7, -1):
                 d_short = dates[i][5:]
-                
-                # 1. 일별 종가 및 차액 (현재가 - 과거종가)
                 p_past = prices[i]
                 diff = curr - p_past
+                
+                # 🌟 에러가 났던 숫자 포맷팅 부분을 안전하게 수정했습니다.
                 if curr > 1000:
-                    diff_str = f"({diff:+, .0f}원)"
+                    diff_str = f"({int(diff):+,}원)"
                     p_str = f"{int(p_past):,}원"
                 else:
                     diff_str = f"(${diff:+.2f})"
@@ -143,16 +144,13 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
                 diff_color = "#e53935" if diff > 0 else ("#1e88e5" if diff < 0 else "#666")
                 c1.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | {p_str} <span style='color:{diff_color}; font-weight:bold;'>{diff_str}</span></div>", unsafe_allow_html=True)
                 
-                # 2. 일별 등락률 (전일 대비)
                 chg = ((prices[i] - prices[i-1]) / prices[i-1]) * 100
                 chg_color = "#e53935" if chg > 0 else ("#1e88e5" if chg < 0 else "#666")
                 c2.markdown(f"<div style='font-size:0.8rem; color:{chg_color};'>{d_short} | <b>{chg:+.2f}%</b></div>", unsafe_allow_html=True)
                 
-                # 3. 일별 RSI
                 rsi_val = analyzer.indicator.calculate_rsi(prices[:i+1])
                 c3.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{rsi_val:.1f if rsi_val else '-'}</b></div>", unsafe_allow_html=True)
                 
-                # 4. 일별 거래량
                 c4.markdown(f"<div style='font-size:0.8rem; color:#666;'>{d_short} | <b>{int(volumes[i]):,}</b></div>", unsafe_allow_html=True)
 
         st.divider()
