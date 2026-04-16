@@ -1,4 +1,3 @@
-<div style="border: 1px solid #d3d3d3; padding: 15px; border-radius: 5px; font-family: monospace; line-height: 1.5; background-color: transparent; white-space: pre; overflow-x: auto;">
 import pandas as pd
 
 class TechnicalIndicators:
@@ -48,4 +47,3 @@ def check_macd_crossover(prices):
     if macd_prev >= sig_prev and macd_current < sig_current:
         return "데드크로스"
     return None
-</div>
