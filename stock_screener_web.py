@@ -105,14 +105,28 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
         an = analyzer.analyze(code, name, sector, data)
         if not an: return
 
+        # 🌟 1주일(5거래일) 전 데이터 대비 변화량 계산
+        prices = data.get("close_prices", [])
+        volumes = data.get("volumes", [])
+        
+        price_1w = prices[-6] if len(prices) >= 6 else prices[0]
+        price_diff_1w_pct = ((an['current'] - price_1w) / price_1w) * 100
+        
+        vol_1w = volumes[-6] if len(volumes) >= 6 else volumes[0]
+        vol_diff_1w_pct = ((an['volume'] - vol_1w) / vol_1w) * 100 if vol_1w > 0 else 0
+        
+        rsi_1w = analyzer.indicator.calculate_rsi(prices[:-5]) if len(prices) >= 20 else an['rsi']
+        rsi_diff_1w = an['rsi'] - rsi_1w if rsi_1w else 0
+
         st.header(f"📈 {name} 상세 분석 리포트")
         c1, c2, c3, c4 = st.columns(4)
         krw_price = f"{int(an['current']):,}원" if an['current'] > 1000 else f"${an['current']:.2f} (약 {int(an['current'] * exc_rate):,}원)"
         
-        c1.metric("현재가", krw_price)
-        c2.metric("등락율", f"{an['change']:.2f}%")
-        c3.metric("RSI", f"{an['rsi']:.1f}")
-        c4.metric("거래량", f"{int(an['volume']):,}")
+        # 🌟 st.metric의 delta 기능을 이용해 1주 전 변화율을 화살표와 함께 표시
+        c1.metric("현재가", krw_price, f"1주 전 대비 {price_diff_1w_pct:+.2f}%")
+        c2.metric("당일 등락률", f"{an['change']:.2f}%") 
+        c3.metric("RSI", f"{an['rsi']:.1f}", f"1주 전 대비 {rsi_diff_1w:+.1f}p")
+        c4.metric("거래량", f"{int(an['volume']):,}", f"1주 전 대비 {vol_diff_1w_pct:+.2f}%")
         
         st.divider()
         st.subheader("🏢 기업 개요 및 펀더멘탈")
@@ -163,9 +177,24 @@ def render_analysis_report(fetcher, analyzer, exc_rate, code, name, sector):
 # 메인 앱 시작
 # ==========================================
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
+
+st.markdown("""
+    <style>
+    div[data-baseweb="input"] {
+        border: 2px solid #1E90FF !important;
+        border-radius: 8px !important;
+        background-color: #f8fbff !important;
+    }
+    div[data-baseweb="input"] input {
+        font-size: 1.1rem !important;
+        font-weight: bold !important;
+        padding: 12px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("🚀 Stock Screener Pro (개인 맞춤형 UI 📊)")
 
-# 🌟 에러 방지(호환성 패치): 과거의 소괄호 데이터가 있으면 새 방식으로 자동 변환해주는 부분
 if "custom_stocks" not in st.session_state: 
     st.session_state.custom_stocks = []
 else:
@@ -193,9 +222,6 @@ if check_password():
 
     tab1, tab2 = st.tabs(["🔍 종목 검색 및 상세분석", "⭐ 내 관심종목 & 포트폴리오 관리"])
 
-    # -----------------------------------
-    # 탭 1: 상세 분석 및 검색
-    # -----------------------------------
     with tab1:
         st.markdown("### 🕒 최근 검색 기록 (최대 10개)")
         if st.session_state.search_history:
@@ -209,8 +235,16 @@ if check_password():
 
         st.divider()
 
-        st.markdown("### 🔍 새로운 종목 검색")
-        query = st.text_input("기업명이나 영문 티커(IREN, BTQ)를 입력하세요", key="search_query")
+        st.markdown("## 🔎 **새로운 종목 검색**")
+        st.info("👇 **아래 파란색 검색창을 클릭하고 분석할 기업명이나 영문 티커(IREN, BTQ)를 입력하세요.**")
+        
+        query = st.text_input(
+            "종목 검색창", 
+            placeholder="예시: 삼성전자, IREN (입력 후 Enter를 누르세요)", 
+            label_visibility="collapsed", 
+            key="search_query"
+        )
+        
         if query:
             cands = search_candidates(query, limit=10)
             if cands.empty:
@@ -236,9 +270,6 @@ if check_password():
             target = st.session_state.active_analysis
             render_analysis_report(fetcher, analyzer, exc_rate, target["code"], target["name"], target["sector"])
 
-    # -----------------------------------
-    # 탭 2: 내 관심종목 및 포트폴리오
-    # -----------------------------------
     with tab2:
         st.markdown("### ⭐ 저장된 내 관심종목 리스트")
         if not st.session_state.custom_stocks:
