@@ -12,15 +12,13 @@ import xml.etree.ElementTree as ET
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
-# 🌟 최상단 설정
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
-# 모바일 취소선 방지 및 PC/모바일 통합 스타일
 st.markdown("""
     <meta name="format-detection" content="telephone=no">
     <style>
     div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
-    .stTable td { text-align: center !important; }
+    .stTable td { text-align: center !important; font-size: 0.9rem; }
     .big-font { font-size:1.8rem !important; font-weight: bold; }
     .red-text { color: #f44336; font-weight: bold; }
     .blue-text { color: #2196f3; font-weight: bold; }
@@ -32,8 +30,7 @@ CORRECT_PASSWORD_HASH = "130568a3fc17054bfe36db359792c487f3a3debd226942fc2394688
 @st.cache_data(ttl=3600)
 def get_exchange_rate():
     try:
-        rate = yf.Ticker("USDKRW=X").history(period="1d")
-        return float(rate['Close'].iloc[-1])
+        return float(yf.Ticker("USDKRW=X").history(period="1d")['Close'].iloc[-1])
     except: return 1420.0
 
 @st.cache_data(ttl=3600)
@@ -64,7 +61,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     c1, c2, c3, c4 = st.columns(4)
     p_unit = "원" if curr > 1000 else "$"
     
-    # 숫자 안전 포맷팅
     curr_txt = f"{curr:,.2f}" if p_unit == "$" else f"{int(curr):,}"
     diff_txt = f"{diff:+,.2f}" if p_unit == "$" else f"{int(diff):+,}"
     conv_txt = f"{int(curr * exc_rate):,}"
@@ -74,7 +70,6 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     
     c2.markdown(f"등락률  \n<span class='big-font {color_class}'>{chg:+.2f}%</span>", unsafe_allow_html=True)
     
-    # 🌟 RSI 에러 방지 처리
     rsi_val = an.get('rsi')
     rsi_txt = f"{rsi_val:.1f}" if rsi_val is not None else "-"
     c3.markdown(f"RSI  \n<span class='big-font'>{rsi_txt}</span>", unsafe_allow_html=True)
@@ -88,9 +83,13 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             p, po = data['close_prices'][i], data['close_prices'][i-1]
             df_val, dc = p-po, ((p-po)/po)*100
             clr = "red" if df_val > 0 else ("blue" if df_val < 0 else "black")
+            
             p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
             df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
-            rows.append([data['dates'][i][5:], p_f, f"<span style='color:{clr}'>{df_f}</span>", f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
+            
+            rows.append([data['dates'][i][5:], p_f, 
+                         f"<span style='color:{clr}'>{df_f}</span>",
+                         f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
         st.write(pd.DataFrame(rows, columns=["날짜", "종가", "변동", "등락률", "거래량"]).to_html(escape=False, index=False), unsafe_allow_html=True)
 
     st.divider()
@@ -146,14 +145,17 @@ else:
         query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 후보가 나타납니다.")
         if query:
             cands = search_candidates(query)
-            if not cands.empty:
-                pick = st.selectbox("정확한 종목 선택", [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()])
+            
+            if cands.empty:
+                st.warning(f"'{query}'에 대한 검색 결과가 없습니다. 거래소 서버 지연일 수 있으니 ⚙️관리 탭에서 CSV를 업로드하시거나 잠시 후 다시 시도해주세요.")
+            else:
+                options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
+                pick = st.selectbox("정확한 종목 선택", options)
                 if st.button("📊 즉시 분석", type="primary", use_container_width=True):
                     code = pick.split("(")[1].replace(")", "")
                     name = pick.split(" (")[0]
                     item = {"code": code, "name": name, "sector": "기타"}
                     st.session_state.active_item = item
-                    # 히스토리 업데이트
                     st.session_state.search_history = [i for i in st.session_state.search_history if i['code'] != code]
                     st.session_state.search_history.insert(0, item)
                     st.session_state.search_history = st.session_state.search_history[:10]
@@ -180,9 +182,10 @@ else:
 
     with tab3:
         st.subheader("📥 데이터베이스 관리")
+        st.write("서버 오류를 대비하여, 다운로드한 CSV 파일을 프로젝트 폴더에 `krx_stock_list.csv` 이름으로 저장해두면 오프라인 상태에서도 종목 검색이 가능합니다.")
         db_df = get_stock_db()
         csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📊 현재 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"stock_list_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
+        st.download_button("📊 현재 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"krx_stock_list.csv", mime="text/csv")
         st.write("---")
         if st.button("🚪 로그아웃"):
             st.session_state.pw_ok = False; st.rerun()
