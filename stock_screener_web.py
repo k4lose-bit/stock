@@ -12,16 +12,36 @@ import xml.etree.ElementTree as ET
 from modules.data_fetcher import DataFetcher, get_stock_db, search_candidates
 from modules.analyzer import StockAnalyzer
 
+# 🌟 최상단 설정
 st.set_page_config(page_title="Stock Screener Pro", layout="wide")
 
+# 🌟 휑한 느낌을 없애고 1차 때의 꽉 찬 느낌을 살리는 '카드형 UI' 및 테이블 CSS
 st.markdown("""
     <meta name="format-detection" content="telephone=no">
     <style>
     div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
-    .stTable td { text-align: center !important; font-size: 0.9rem; }
-    .big-font { font-size:1.8rem !important; font-weight: bold; }
-    .red-text { color: #f44336; font-weight: bold; }
-    .blue-text { color: #2196f3; font-weight: bold; }
+    
+    /* 꽉 찬 느낌의 카드형 위젯 스타일 */
+    .metric-card {
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 20px 10px;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        margin-bottom: 15px;
+    }
+    .metric-title { color: #616161; font-size: 1.0rem; font-weight: 600; margin-bottom: 8px; }
+    .metric-value { color: #212121; font-size: 1.9rem; font-weight: 800; }
+    .metric-delta.red { color: #f44336; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+    .metric-delta.blue { color: #2196f3; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+    .metric-delta.gray { color: #9e9e9e; font-size: 1.1rem; font-weight: bold; margin-top: 5px; }
+    .metric-caption { color: #9e9e9e; font-size: 0.85rem; margin-top: 5px; }
+
+    /* 표(테이블) 디자인 깔끔하게 통일 */
+    .custom-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .custom-table th, .custom-table td { border-bottom: 1px solid #eeeeee; padding: 12px 8px; text-align: center; font-size: 0.95rem; }
+    .custom-table th { background-color: #f8f9fa; color: #424242; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -42,13 +62,36 @@ def get_company_news(company_name):
         return [{"title": i.find('title').text, "link": i.find('link').text} for i in root.findall('.//item')[:5]]
     except: return []
 
+# 🌟 카드 UI를 그려주는 도우미 함수
+def draw_card(title, value_str, diff_val, diff_str, caption=""):
+    color_cls = "red" if diff_val > 0 else ("blue" if diff_val < 0 else "gray")
+    arrow = "▲ " if diff_val > 0 else ("▼ " if diff_val < 0 else "")
+    
+    delta_html = f"<div class='metric-delta {color_cls}'>{arrow}{diff_str}</div>" if diff_str else ""
+    caption_html = f"<div class='metric-caption'>{caption}</div>" if caption else ""
+    
+    return f"""
+    <div class="metric-card">
+        <div class="metric-title">{title}</div>
+        <div class="metric-value">{value_str}</div>
+        {delta_html}
+        {caption_html}
+    </div>
+    """
+
 def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     data = fetcher.get_stock_data(item['code'])
     if not data:
-        st.error("⚠️ 데이터를 불러오지 못했습니다. 종목 코드나 네트워크를 확인해주세요.")
+        st.error("⚠️ 실시간 데이터를 불러오지 못했습니다. 종목 코드나 네트워크를 확인해주세요.")
         return
 
     an = analyzer.analyze(item['code'], item['name'], item['sector'], data)
+    
+    # 🌟 핵심 방어막 복구: 분석 결과가 None이면 에러 뿜지 말고 여기서 차단!
+    if not an:
+        st.warning("⚠️ 상장 기간이 너무 짧거나 데이터가 부족하여 분석 지표를 계산할 수 없습니다.")
+        return
+        
     news = get_company_news(item['name'])
     
     st.subheader(f"📈 {item['name']} ({item['code']}) 리포트")
@@ -56,42 +99,50 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     curr, prev = data['current'], data['prev_close']
     diff = curr - prev
     chg = (diff / prev) * 100
-    color_class = "red-text" if diff > 0 else ("blue-text" if diff < 0 else "")
     
     c1, c2, c3, c4 = st.columns(4)
     p_unit = "원" if curr > 1000 else "$"
     
     curr_txt = f"{curr:,.2f}" if p_unit == "$" else f"{int(curr):,}"
     diff_txt = f"{diff:+,.2f}" if p_unit == "$" else f"{int(diff):+,}"
-    conv_txt = f"{int(curr * exc_rate):,}"
+    conv_txt = f"약 {int(curr * exc_rate):,}원" if p_unit == "$" else ""
     
-    c1.markdown(f"현재가  \n<span class='big-font'>{curr_txt}{p_unit}</span>  \n<span class='{color_class}'>{diff_txt}{p_unit}</span>", unsafe_allow_html=True)
-    c1.caption(f"약 {conv_txt}원")
-    
-    c2.markdown(f"등락률  \n<span class='big-font {color_class}'>{chg:+.2f}%</span>", unsafe_allow_html=True)
+    # 🌟 1차 버전의 꽉 찬 느낌을 주는 카드 디자인 적용
+    c1.markdown(draw_card("현재가", f"{curr_txt}{p_unit}", diff, f"{diff_txt}{p_unit}", conv_txt), unsafe_allow_html=True)
+    c2.markdown(draw_card("등락률", f"{chg:+.2f}%", diff, ""), unsafe_allow_html=True)
     
     rsi_val = an.get('rsi')
     rsi_txt = f"{rsi_val:.1f}" if rsi_val is not None else "-"
-    c3.markdown(f"RSI  \n<span class='big-font'>{rsi_txt}</span>", unsafe_allow_html=True)
+    c3.markdown(draw_card("RSI", rsi_txt, 0, ""), unsafe_allow_html=True)
     
-    c4.markdown(f"거래량  \n<span class='big-font'>{int(data['volume']):,}</span>", unsafe_allow_html=True)
+    vol_txt = f"{int(data['volume']):,}"
+    c4.markdown(draw_card("거래량", vol_txt, 0, ""), unsafe_allow_html=True)
 
     if len(data['dates']) >= 6:
         st.write("#### 🕒 최근 5거래일 추이")
-        rows = []
+        table_html = "<table class='custom-table'><tr><th>날짜</th><th>종가</th><th>변동</th><th>등락률</th><th>거래량</th></tr>"
+        
         for i in range(-2, -7, -1):
             p, po = data['close_prices'][i], data['close_prices'][i-1]
             df_val, dc = p-po, ((p-po)/po)*100
-            clr = "red" if df_val > 0 else ("blue" if df_val < 0 else "black")
+            clr = "#f44336" if df_val > 0 else ("#2196f3" if df_val < 0 else "#616161")
+            
             p_f = f"{p:,.2f}$" if p < 1000 else f"{int(p):,}원"
             df_f = f"{df_val:+,.2f}$" if p < 1000 else f"{int(df_val):+,}원"
-            rows.append([data['dates'][i][5:], p_f, 
-                         f"<span style='color:{clr}'>{df_f}</span>",
-                         f"<span style='color:{clr}'>{dc:+.2f}%</span>", f"{int(data['volumes'][i]):,}"])
-        st.write(pd.DataFrame(rows, columns=["날짜", "종가", "변동", "등락률", "거래량"]).to_html(escape=False, index=False), unsafe_allow_html=True)
+            
+            table_html += f"<tr>"
+            table_html += f"<td>{data['dates'][i][5:]}</td>"
+            table_html += f"<td><b>{p_f}</b></td>"
+            table_html += f"<td style='color:{clr}; font-weight:bold;'>{df_f}</td>"
+            table_html += f"<td style='color:{clr}; font-weight:bold;'>{dc:+.2f}%</td>"
+            table_html += f"<td>{int(data['volumes'][i]):,}</td>"
+            table_html += "</tr>"
+            
+        table_html += "</table>"
+        st.markdown(table_html, unsafe_allow_html=True)
 
     st.divider()
-    st.subheader("💡 분석 의견")
+    st.subheader("💡 종합 분석 의견")
     st.markdown(f"### {an['recommendation_color']} {an['recommendation']}")
     for d in an['details']: st.success(d)
     
@@ -101,7 +152,8 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
     for n in news: st.markdown(f"🔗 [{n['title']}]({n['link']})")
 
     if not any(s["code"] == item['code'] for s in st.session_state.get("custom_stocks", [])):
-        if st.button("➕ 관심종목 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True):
+        st.write("")
+        if st.button("➕ 이 종목을 '관심종목'에 추가", key=f"add_{item['code']}_{key_suffix}", use_container_width=True, type="primary"):
             if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
             st.session_state.custom_stocks.append(item); st.rerun()
 
@@ -140,14 +192,15 @@ else:
                     st.session_state.active_item = h; st.rerun()
         
         st.divider()
-        query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 후보가 나타납니다.")
+        query = st.text_input("종목명 입력 (삼성, LG, IREN...)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
         if query:
             cands = search_candidates(query)
+            
             if cands.empty:
-                st.warning(f"'{query}'에 대한 검색 결과가 없습니다. 거래소 서버 지연일 수 있으니 ⚙️관리 탭에서 전체종목 CSV를 업로드 해주세요.")
+                st.warning(f"'{query}'에 대한 검색 결과가 없습니다. ⚙️관리 탭에서 CSV를 업로드하시거나 잠시 후 다시 시도해주세요.")
             else:
                 options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
-                pick = st.selectbox("정확한 종목 선택", options)
+                pick = st.selectbox("정확한 종목을 선택하세요", options)
                 if st.button("📊 즉시 분석", type="primary", use_container_width=True):
                     code = pick.split("(")[1].replace(")", "")
                     name = pick.split(" (")[0]
@@ -159,12 +212,18 @@ else:
                     st.rerun()
 
         if st.session_state.active_item:
-            st.divider(); render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, "tab1")
+            st.divider()
+            render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, "tab1")
 
     with tab2:
+        st.markdown("### ⭐ 내 관심종목 리스트")
         if not st.session_state.custom_stocks: st.info("관심종목을 추가해 보세요.")
         else:
-            if st.button("🗑️ 리스트 전체 삭제"): st.session_state.custom_stocks = []; st.rerun()
+            col1, col2 = st.columns([8, 2])
+            with col2:
+                if st.button("🗑️ 전체 삭제", use_container_width=True): 
+                    st.session_state.custom_stocks = []; st.rerun()
+            
             for i, s in enumerate(st.session_state.custom_stocks):
                 c1, c2, c3 = st.columns([5, 3, 2])
                 c1.write(f"**{s['name']}** ({s['code']})")
@@ -173,20 +232,20 @@ else:
                     st.session_state.port_code = None if st.session_state.port_code == s['code'] else s['code']; st.rerun()
                 if c3.button("❌", key=f"p_del_{i}", use_container_width=True):
                     st.session_state.custom_stocks.pop(i); st.rerun()
+                
+                # 🌟 관심종목 탭에서도 카드가 펼쳐지도록 적용
                 if st.session_state.port_code == s['code']:
                     render_report(fetcher, analyzer, exc_rate, s, f"tab2_{i}")
                     st.divider()
 
     with tab3:
         st.subheader("📥 데이터베이스 관리")
-        st.write("스트림릿 클라우드 환경에서는 한국거래소(KRX) 연결이 차단될 수 있습니다. 종목 검색이 원활하지 않다면 직접 CSV 파일을 업로드해주세요.")
+        st.write("스트림릿 클라우드 환경에서는 한국거래소(KRX) 연결이 간헐적으로 차단될 수 있습니다. 종목 검색이 안 될 경우 직접 CSV 파일을 업로드해주세요.")
         
-        # 🌟 수동 업로드 위젯 추가
         uploaded_file = st.file_uploader("전체 종목 리스트 CSV 업로드", type=['csv'])
         if uploaded_file is not None:
             try:
                 df = pd.read_csv(uploaded_file)
-                # 컬럼 매핑 보정
                 col_map = {}
                 for c in df.columns:
                     if "코드" in c or "code" in c.lower(): col_map[c] = "종목코드"
@@ -197,14 +256,14 @@ else:
                 if '섹터' not in df.columns: df['섹터'] = '기타'
                 
                 st.session_state.uploaded_db = df[['종목코드', '회사명', '섹터']].dropna()
-                st.success(f"✅ {len(st.session_state.uploaded_db)}개의 종목 데이터가 성공적으로 업로드되어 시스템에 반영되었습니다! (검색 탭을 다시 확인해 보세요)")
+                st.success(f"✅ {len(st.session_state.uploaded_db)}개의 종목 데이터가 성공적으로 반영되었습니다!")
             except Exception as e:
-                st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
+                st.error(f"오류가 발생했습니다: {e}")
 
         st.write("---")
         db_df = get_stock_db()
         csv_data = db_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📊 현재 적용 중인 종목 리스트(CSV) 확인용 다운로드", data=csv_data, file_name=f"krx_stock_list.csv", mime="text/csv")
+        st.download_button("📊 현재 적용 중인 종목 리스트(CSV) 다운로드", data=csv_data, file_name=f"krx_stock_list_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
         st.write("---")
-        if st.button("🚪 로그아웃"):
+        if st.button("🚪 로그아웃", type="primary"):
             st.session_state.pw_ok = False; st.rerun()
