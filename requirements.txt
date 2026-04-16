@@ -1,6 +1,6 @@
 streamlit
 pandas
 yfinance
-gspread
-oauth2client
+requests
 ta
+deep-translator
