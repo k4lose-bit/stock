@@ -18,9 +18,8 @@ st.markdown("""
     <style>
         a[href^="tel"] { color: inherit !important; text-decoration: none !important; }
         div[data-baseweb="input"] { border: 2px solid #1E90FF !important; }
-        /* 상승/하락 색상 강조 (한국 국룰 버전) */
-        [data-testid="stMetricDelta"] svg { display: none; } /* 기본 화살표 숨김 */
-        [data-testid="stMetricDelta"] > div { font-weight: bold !important; }
+        /* 테이블 텍스트 중앙 정렬 및 가독성 */
+        .stTable td { text-align: center !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -95,43 +94,54 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
         news_list = get_company_news(item['name'])
         
         st.header(f"📈 {item['name']} 상세 분석")
-        c1, c2, c3, c4 = st.columns(4)
+        
         curr = an['current']
-        diff = curr - data['prev_close']
+        prev_close = data['prev_close']
+        diff = curr - prev_close
+        chg = an['change']
+        
+        # 🌟 색상 국룰 적용 (상승 빨강, 하락 파랑)
+        main_color = "#f44336" if diff > 0 else ("#2196f3" if diff < 0 else "#666")
+        
+        c1, c2, c3, c4 = st.columns(4)
+        
+        # 1. 현재가 (HTML 강제 색상 주입)
         p_str = f"{int(curr):,}원" if curr > 1000 else f"${curr:.2f}"
         d_str = f"{int(diff):+,}원" if curr > 1000 else f"${diff:+.2f}"
-        
-        # 🌟 현재가 색상 처리 (빨강/파랑)
-        c1.metric("현재가", p_str, d_str)
+        c1.markdown(f"**현재가** \n<span style='font-size:1.8rem; font-weight:bold;'>{p_str}</span>  \n<span style='color:{main_color}; font-weight:bold;'>{d_str}</span>", unsafe_allow_html=True)
         c1.caption(f"약 {int(curr * exc_rate):,}원")
         
-        c2.metric("등락률", f"{an['change']:.2f}%", f"{an['change']:+.2f}%")
-        c3.metric("RSI", f"{an['rsi']:.1f}")
-        c4.metric("거래량", f"{int(an['volume']):,}")
+        # 2. 등락률
+        c2.markdown(f"**등락률** \n<span style='font-size:1.8rem; font-weight:bold; color:{main_color};'>{chg:+.2f}%</span>", unsafe_allow_html=True)
+        
+        # 3. RSI
+        c3.markdown(f"**RSI** \n<span style='font-size:1.8rem; font-weight:bold;'>{an['rsi']:.1f}</span>", unsafe_allow_html=True)
+        
+        # 4. 거래량
+        c4.markdown(f"**거래량** \n<span style='font-size:1.8rem; font-weight:bold;'>{int(an['volume']):,}</span>", unsafe_allow_html=True)
         
         if len(data['dates']) >= 10:
             st.write("#### 🕒 최근 5거래일 추이 (전일 대비)")
-            hist = []
+            
+            # 테이블용 데이터 생성 (HTML 색상 태그 포함)
+            hist_rows = []
             for i in range(-2, -7, -1):
                 p_past, p_old = data['close_prices'][i], data['close_prices'][i-1]
-                df_val = p_past - p_old
-                chg = ((p_past - p_old) / p_old) * 100
+                v_df = p_past - p_old
+                v_chg = ((p_past - p_old) / p_old) * 100
+                v_color = "red" if v_df > 0 else ("blue" if v_df < 0 else "black")
                 
-                # 색상 입히기 (HTML)
-                color = "#e53935" if df_val > 0 else ("#1e88e5" if df_val < 0 else "#666")
-                
-                # 테이블 데이터 구성
-                row_data = {
-                    "날짜": data['dates'][i][5:],
-                    "종가": f"{int(p_past):,}원" if curr > 1000 else f"${p_past:.2f}",
-                    "변동": f"{int(df_val):+,}원" if curr > 1000 else f"${df_val:+.2f}",
-                    "등락률": f"{chg:+.2f}%",
-                    "거래량": f"{int(data['volumes'][i]):,}"
-                }
-                hist.append(row_data)
+                hist_rows.append([
+                    data['dates'][i][5:],
+                    f"{int(p_past):,}원" if curr > 1000 else f"${p_past:.2f}",
+                    f"<span style='color:{v_color}; font-weight:bold;'>{int(v_df):+,}원</span>" if curr > 1000 else f"<span style='color:{v_color}; font-weight:bold;'>${v_df:+.2f}</span>",
+                    f"<span style='color:{v_color}; font-weight:bold;'>{v_chg:+.2f}%</span>",
+                    f"{int(data['volumes'][i]):,}"
+                ])
             
-            # 테이블 스타일링 적용하여 출력
-            st.table(pd.DataFrame(hist).set_index("날짜"))
+            df_hist = pd.DataFrame(hist_rows, columns=["날짜", "종가", "변동", "등락률", "거래량"])
+            # HTML로 변환하여 출력 (색상 유지)
+            st.write(df_hist.to_html(escape=False, index=False, justify='center'), unsafe_allow_html=True)
 
         st.divider()
         if prof:
@@ -185,7 +195,7 @@ if check_password():
                 if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
                     st.session_state.active_item = h; st.rerun()
         
-        query = st.text_input("종목 검색 (삼성전자, IREN, BTQ...)", key="main_search", placeholder="기업명이나 티커 입력 후 Enter")
+        query = st.text_input("종목 검색 (삼성전자, IREN, BTQ...)", key="main_search")
         if query:
             cands = search_candidates(query, limit=5)
             if not cands.empty:
