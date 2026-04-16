@@ -18,11 +18,9 @@ def _fetch_fdr_krx():
     return pd.DataFrame()
 
 def get_stock_db():
-    # 🌟 1. 세션 스테이트에 사용자가 탭에서 업로드한 파일이 있으면 무조건 1순위로 사용!
     if "uploaded_db" in st.session_state and st.session_state.uploaded_db is not None:
         return st.session_state.uploaded_db
         
-    # 2. 앱 폴더(로컬/깃허브)에 저장된 파일이 있으면 2순위로 사용
     try:
         csv_path = "krx_stock_list.csv"
         if os.path.exists(csv_path):
@@ -38,12 +36,10 @@ def get_stock_db():
             return df[['종목코드', '회사명', '섹터']].dropna()
     except: pass
 
-    # 3. 실시간 서버 데이터 수집 시도 (스트림릿 클라우드에서 차단될 확률 높음)
     fdr_df = _fetch_fdr_krx()
     if not fdr_df.empty:
         return fdr_df
 
-    # 4. 전부 다 실패했을 때의 비상용 최후 보루
     return pd.DataFrame([
         {'회사명': '삼성전자', '종목코드': '005930', '섹터': '반도체'},
         {'회사명': 'SK하이닉스', '종목코드': '000660', '섹터': '반도체'},
@@ -80,6 +76,7 @@ class DataFetcher:
             
             return {
                 "current": float(df['Close'].iloc[-1]),
+                "open": float(df['Open'].iloc[-1]), # 🌟 이 데이터를 빼먹어서 오류가 났었습니다! 복구 완료.
                 "prev_close": float(df['Close'].iloc[-2]),
                 "volume": float(df['Volume'].iloc[-1]),
                 "close_prices": df["Close"].astype(float).tolist(),
