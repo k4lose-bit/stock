@@ -3,6 +3,8 @@ import streamlit as st
 import yfinance as yf
 import re
 import os
+import requests
+import xml.etree.ElementTree as ET
 
 # 🌟 서학개미(해외주식) 전용 스마트 한글-티커 사전
 US_STOCK_DICT = {
@@ -78,18 +80,34 @@ def search_candidates(query, limit=15):
     return results.drop_duplicates(subset=['종목코드']).head(limit)
 
 class DataFetcher:
-    # 🌟 오류의 원인이었던 캐시(@st.cache_data)를 완전히 삭제했습니다.
-    # 이제 '분석 시작' 버튼을 누를 때마다 무조건 새로운 데이터를 가져옵니다.
     def get_stock_data(self, code):
         try:
-            symbol = f"{code}.KS" if (code.isdigit() and len(code) == 6) else code
-            stock = yf.Ticker(symbol)
-            df = stock.history(period="3mo")
-            
-            if df.empty and code.isdigit():
-                symbol = f"{code}.KQ"
-                df = yf.Ticker(symbol).history(period="3mo")
-            if df is None or len(df) < 2: return None
+            if code.isdigit() and len(code) == 6:
+                # 🌟 한국 주식은 무조건 네이버 금융 API에서 실시간 데이터 긁어오기!
+                url = f"https://fchart.stock.naver.com/sise.nhn?symbol={code}&timeframe=day&count=100&requestType=0"
+                res = requests.get(url, timeout=5)
+                root = ET.fromstring(res.text)
+                
+                records = []
+                for item in root.findall('.//item'):
+                    data = item.attrib['data'].split('|')
+                    records.append({
+                        'Date': pd.to_datetime(data[0]),
+                        'Open': float(data[1]),
+                        'High': float(data[2]),
+                        'Low': float(data[3]),
+                        'Close': float(data[4]),
+                        'Volume': float(data[5])
+                    })
+                df = pd.DataFrame(records)
+                if df.empty or len(df) < 2: return None
+                df.set_index('Date', inplace=True)
+            else:
+                # 🌟 해외 주식은 여전히 야후 파이낸스 사용
+                symbol = code
+                stock = yf.Ticker(symbol)
+                df = stock.history(period="3mo")
+                if df.empty or len(df) < 2: return None
             
             return {
                 "current": float(df['Close'].iloc[-1]),
