@@ -78,9 +78,9 @@ def search_candidates(query, limit=15):
     return results.drop_duplicates(subset=['종목코드']).head(limit)
 
 class DataFetcher:
-    # 🌟 기존 10분(600초) 지연 캐시를 30초로 단축하여 실시간 체감 속도를 높임
-    @st.cache_data(ttl=30)
-    def get_stock_data(_self, code):
+    # 🌟 오류의 원인이었던 캐시(@st.cache_data)를 완전히 삭제했습니다.
+    # 이제 '분석 시작' 버튼을 누를 때마다 무조건 새로운 데이터를 가져옵니다.
+    def get_stock_data(self, code):
         try:
             symbol = f"{code}.KS" if (code.isdigit() and len(code) == 6) else code
             stock = yf.Ticker(symbol)
