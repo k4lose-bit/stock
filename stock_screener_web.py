@@ -38,7 +38,6 @@ def load_user_favs(sheet, nickname, pin):
             sheet_pin = str(row.get('PIN', '')).strip()
             
             if sheet_nick == clean_nick:
-                # 🌟 구글 시트가 '0123'을 '123'으로 바꿨더라도 숫자로 변환해 완벽하게 비교
                 if sheet_pin == clean_pin or (sheet_pin.isdigit() and clean_pin.isdigit() and int(sheet_pin) == int(clean_pin)):
                     return json.loads(row.get('Favorites', "[]"))
                 else: 
@@ -51,7 +50,6 @@ def save_user_favs(sheet, nickname, pin, fav_list):
         fav_json = json.dumps(fav_list, ensure_ascii=False)
         records = sheet.get_all_records()
         clean_nick = str(nickname).strip()
-        # 🌟 구글 시트가 0을 지우지 못하게 강제로 문자열(') 처리
         safe_pin = f"'{str(pin).strip()}"
         
         if not records:
@@ -243,11 +241,19 @@ def render_report(fetcher, analyzer, exc_rate, item, key_suffix=""):
             
             st.rerun()
 
+# --- 상태 초기화 ---
 if "custom_stocks" not in st.session_state: st.session_state.custom_stocks = []
 if "search_history" not in st.session_state: st.session_state.search_history = []
 if "active_item" not in st.session_state: st.session_state.active_item = None
 if "port_code" not in st.session_state: st.session_state.port_code = None
 
+# 🌟 [스마트폰 뒤로가기 방어 로직 1]
+# 앱 상단에서 URL 꼬리표('view')가 사라졌는데 분석화면이 켜져있다면, 사용자가 뒤로가기를 누른 것으로 간주하고 화면을 닫음
+if "view" not in st.query_params and st.session_state.active_item is not None:
+    st.session_state.active_item = None
+    st.rerun()
+
+# --- 메인 로직 ---
 if "login_info" not in st.session_state:
     st.title("🚀 Stock Screener Pro")
     st.write("---")
@@ -258,7 +264,6 @@ if "login_info" not in st.session_state:
         pin = st.text_input("PIN 번호 4자리", type="password", placeholder="숫자 4자리")
         
         if st.button("시작하기", use_container_width=True, type="primary"):
-            # 🌟 사용자가 입력한 값의 양옆 공백(띄어쓰기)을 모두 제거하여 클린하게 만듦
             clean_nick = nick.strip()
             clean_pin = pin.strip()
             
@@ -295,39 +300,58 @@ else:
     tab1, tab2, tab3 = st.tabs(["🔍 종목 분석", "⭐ 관심종목", "⚙️ 관리"])
 
     with tab1:
-        st.markdown("### 🕒 최근 검색")
-        if st.session_state.search_history:
-            cols = st.columns(5)
-            for i, h in enumerate(st.session_state.search_history):
-                if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
-                    st.session_state.active_item = h
-                    st.rerun()
-        
-        st.divider()
-        
-        _, search_col, _ = st.columns([1, 2, 1])
-        with search_col:
-            query = st.text_input("종목명 입력 (한국주식, 또는 애플/테슬라/엔비디아 등)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
-            if query:
-                cands = search_candidates(query)
-                if cands.empty:
-                    st.warning(f"'{query}'에 대한 검색 결과가 없습니다.")
-                else:
-                    options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
-                    pick = st.selectbox("정확한 종목을 선택하세요", options)
-                    if st.button("📊 즉시 분석", type="primary", use_container_width=True):
-                        code = pick.split("(")[1].replace(")", "")
-                        name = pick.split(" (")[0]
-                        item = {"code": code, "name": name, "sector": "기타"}
-                        st.session_state.active_item = item
-                        st.session_state.search_history = [i for i in st.session_state.search_history if i['code'] != code]
-                        st.session_state.search_history.insert(0, item)
-                        st.session_state.search_history = st.session_state.search_history[:10]
+        # 분석 중이 아닐 때만 검색창을 표시 (화면 깔끔하게 정리)
+        if st.session_state.active_item is None:
+            st.markdown("### 🕒 최근 검색")
+            if st.session_state.search_history:
+                cols = st.columns(5)
+                for i, h in enumerate(st.session_state.search_history):
+                    if cols[i%5].button(h['name'], key=f"h_{i}", use_container_width=True):
+                        st.session_state.active_item = h
+                        st.query_params["view"] = "report" # 가짜 꼬리표 달기
                         st.rerun()
-
-        if st.session_state.active_item:
+            
             st.divider()
+            
+            _, search_col, _ = st.columns([1, 2, 1])
+            with search_col:
+                query = st.text_input("종목명 입력 (한국주식, 또는 애플/테슬라/엔비디아 등)", placeholder="검색어를 입력하면 아래에 후보가 나타납니다.")
+                if query:
+                    cands = search_candidates(query)
+                    if cands.empty:
+                        st.warning(f"'{query}'에 대한 검색 결과가 없습니다.")
+                    else:
+                        options = [f"{r['회사명']} ({r['종목코드']})" for _, r in cands.iterrows()]
+                        pick = st.selectbox("정확한 종목을 선택하세요", options)
+                        if st.button("📊 즉시 분석", type="primary", use_container_width=True):
+                            code = pick.split("(")[1].replace(")", "")
+                            name = pick.split(" (")[0]
+                            item = {"code": code, "name": name, "sector": "기타"}
+                            st.session_state.active_item = item
+                            
+                            # 🌟 [스마트폰 뒤로가기 방어 로직 2] 검색 시 URL 꼬리표 부착
+                            st.query_params["view"] = "report"
+                            
+                            st.session_state.search_history = [i for i in st.session_state.search_history if i['code'] != code]
+                            st.session_state.search_history.insert(0, item)
+                            st.session_state.search_history = st.session_state.search_history[:10]
+                            st.rerun()
+
+        # 분석 화면
+        if st.session_state.active_item:
+            # 🌟 스크롤 올려서 찾을 필요 없이, 다른 종목을 원하면 바로 누를 수 있는 버튼 추가
+            if st.button("🔙 다른 종목 검색하기", use_container_width=True):
+                st.query_params.clear() # 꼬리표 삭제
+                st.session_state.active_item = None
+                st.rerun()
+                
             render_report(fetcher, analyzer, exc_rate, st.session_state.active_item, "tab1")
+            
+            st.divider()
+            if st.button("🔙 위로 가서 다른 종목 검색하기", use_container_width=True):
+                st.query_params.clear()
+                st.session_state.active_item = None
+                st.rerun()
 
     with tab2:
         st.markdown("### ⭐ 내 관심종목 리스트")
