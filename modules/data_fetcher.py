@@ -5,7 +5,6 @@ import re
 import os
 
 # 🌟 서학개미(해외주식) 전용 스마트 한글-티커 사전
-# 여기에 자주 찾는 해외 주식의 한글 이름과 티커를 적어두면 한글로도 검색이 됩니다!
 US_STOCK_DICT = {
     "애플": "AAPL", "테슬라": "TSLA", "엔비디아": "NVDA", "마이크로소프트": "MSFT",
     "구글": "GOOGL", "알파벳": "GOOGL", "아마존": "AMZN", "메타": "META", "페이스북": "META",
@@ -67,12 +66,10 @@ def search_candidates(query, limit=15):
     results = df[df["검색용회사명"].str.contains(q_no_space, na=False)].copy()
     results = results.drop(columns=['검색용회사명'])
     
-    # 1. 영문 티커 직접 입력 시 처리
     if re.match(r'^[A-Z]+$', q):
         us_row = pd.DataFrame([{'회사명': q, '종목코드': q, '섹터': '해외주식'}])
         results = pd.concat([us_row, results])
         
-    # 2. 🌟 한글로 검색한 내용이 '스마트 사전'에 있으면 자동으로 결과에 추가!
     for kr_name, ticker in US_STOCK_DICT.items():
         if q_no_space in kr_name:
             us_row = pd.DataFrame([{'회사명': kr_name, '종목코드': ticker, '섹터': '해외주식'}])
@@ -81,7 +78,8 @@ def search_candidates(query, limit=15):
     return results.drop_duplicates(subset=['종목코드']).head(limit)
 
 class DataFetcher:
-    @st.cache_data(ttl=600)
+    # 🌟 기존 10분(600초) 지연 캐시를 30초로 단축하여 실시간 체감 속도를 높임
+    @st.cache_data(ttl=30)
     def get_stock_data(_self, code):
         try:
             symbol = f"{code}.KS" if (code.isdigit() and len(code) == 6) else code
