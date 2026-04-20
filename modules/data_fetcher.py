@@ -63,19 +63,22 @@ def search_candidates(query, limit=15):
     if not q: return df.head(0)
     
     q_no_space = q.replace(" ", "")
-    df['검색용회사명'] = df['회사명'].str.replace(" ", "").str.upper()
+    df['검색용회사명'] = df['회사명'].astype(str).str.replace(" ", "").str.upper()
     
+    # 1. 국내 주식(또는 이미 DB에 있는 종목) 결과를 최우선으로 찾기
     results = df[df["검색용회사명"].str.contains(q_no_space, na=False)].copy()
     results = results.drop(columns=['검색용회사명'])
     
-    if re.match(r'^[A-Z]+$', q):
-        us_row = pd.DataFrame([{'회사명': q, '종목코드': q, '섹터': '해외주식'}])
-        results = pd.concat([us_row, results])
-        
+    # 2. 서학개미 사전(한글) 매핑 추가
     for kr_name, ticker in US_STOCK_DICT.items():
         if q_no_space in kr_name:
-            us_row = pd.DataFrame([{'회사명': kr_name, '종목코드': ticker, '섹터': '해외주식'}])
+            us_row = pd.DataFrame([{'회사명': f"🇺🇸 {kr_name} (해외)", '종목코드': ticker, '섹터': '해외주식'}])
             results = pd.concat([us_row, results])
+            
+    # 3. 🌟 영문 입력 시, 국내 주식을 덮어쓰지 않게 직접 검색 옵션을 "맨 아래"로 배치
+    if re.match(r'^[A-Z0-9.]+$', q):
+        us_row = pd.DataFrame([{'회사명': f"🌐 해외 티커 직접 검색: {q}", '종목코드': q, '섹터': '해외주식'}])
+        results = pd.concat([results, us_row])
             
     return results.drop_duplicates(subset=['종목코드']).head(limit)
 
@@ -83,7 +86,7 @@ class DataFetcher:
     def get_stock_data(self, code):
         try:
             if code.isdigit() and len(code) == 6:
-                # 🌟 한국 주식은 무조건 네이버 금융 API에서 실시간 데이터 긁어오기!
+                # 한국 주식은 네이버 금융 API에서 실시간 데이터 로드
                 url = f"https://fchart.stock.naver.com/sise.nhn?symbol={code}&timeframe=day&count=100&requestType=0"
                 res = requests.get(url, timeout=5)
                 root = ET.fromstring(res.text)
@@ -103,7 +106,7 @@ class DataFetcher:
                 if df.empty or len(df) < 2: return None
                 df.set_index('Date', inplace=True)
             else:
-                # 🌟 해외 주식은 여전히 야후 파이낸스 사용
+                # 해외 주식은 야후 파이낸스 사용
                 symbol = code
                 stock = yf.Ticker(symbol)
                 df = stock.history(period="3mo")
